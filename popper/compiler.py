@@ -1,0 +1,520 @@
+"""AC4 - 세션 이벤트를 8축 실행 룰(POPPER.md)과 인식론 사이드카(manifest.json)로 컴파일한다.
+
+컴파일러는 순수 fold 파생만 사용한다. 카운터/등급/판정은 저장하지 않고 매 호출마다
+이벤트 스트림에서 다시 계산한다. 산출 경로는 ~/.claude/popper/ 단독이며 사용자 파일에는
+쓰지 않는다.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Iterable, Mapping, Sequence
+
+from popper.counter import DEFAULT_CATALOG, AxisCatalog, fold
+from popper.events import EventType
+
+logger = logging.getLogger(__name__)
+
+CATALOG_VERSION = "v1"
+METRIC_SPEC_VERSION = "v1"
+MANIFEST_VERSION = "1"
+SCOPE = "global"
+
+POPPER_MD = "POPPER.md"
+MANIFEST_JSON = "manifest.json"
+SETTINGS_JSON = "settings.popper.json"
+OUTPUT_FILES = (POPPER_MD, MANIFEST_JSON, SETTINGS_JSON)
+
+DEFAULT_PREREG_REF = "docs/prereg/prereg_sealed.json"
+
+GRADE_DISCRIMINATED = "discriminated"
+GRADE_INDISCRIMINATE = "indiscriminate"
+GRADE_UNTESTED = "untested"
+GRADE_UNSTABLE = "unstable"
+
+GRADE_LABELS = {
+    GRADE_DISCRIMINATED: "판별시험 통과",
+    GRADE_INDISCRIMINATE: "무차별 생존",
+    GRADE_UNTESTED: "완전 미시험",
+    GRADE_UNSTABLE: "불안정",
+}
+
+SOURCE_ELICITED = "elicited"
+SOURCE_MINED_PRIOR = "mined-prior"
+
+RECHECK_CLASS_PRIORITY = ("unstable", "untested-prior", "conflict")
+
+# 채굴 prior 순위 - DEFAULT_CATALOG 튜플 순서를 내림차순 prior로 해석한다.
+# index 0 이 커뮤니티 최빈값(채굴 모드)이며, 생존값이 여러 개면 이 순위가 높은 값을 방출한다.
+MINED_PRIOR: dict[str, tuple[str, ...]] = {
+    axis: tuple(values) for axis, values in DEFAULT_CATALOG.items()
+}
+
+RULE_TEXT: dict[tuple[str, str], str] = {
+    ("response_language", "korean"): "모든 응답과 설명은 한국어로 작성한다.",
+    ("response_language", "english"): "모든 응답과 설명은 영어로 작성한다.",
+    ("response_language", "mirror_user"): "사용자가 쓴 언어를 그대로 따라 응답한다.",
+    ("verbosity", "terse"): "결론과 코드만 제시하고 부연 설명은 생략한다.",
+    ("verbosity", "balanced"): "결론을 먼저 제시하고 핵심 근거만 짧게 덧붙인다.",
+    ("verbosity", "explanatory"): "변경의 배경과 대안까지 단계별로 설명한다.",
+    ("autonomy", "ask_first"): "코드를 수정하기 전에 계획을 제시하고 승인을 받는다.",
+    ("autonomy", "propose_then_act"): "짧은 계획을 먼저 적고 곧바로 이어서 실행한다.",
+    ("autonomy", "act_then_report"): "먼저 실행한 뒤 변경 내역을 요약해 보고한다.",
+    ("commit_style", "conventional"): "커밋 메시지는 feat/fix/refactor 같은 conventional prefix로 시작한다.",
+    ("commit_style", "narrative"): "커밋 메시지는 변경 의도를 서술형 문장으로 적는다.",
+    ("commit_style", "no_auto_commit"): "요청받지 않은 커밋은 만들지 않는다.",
+    ("test_discipline", "test_first"): "구현 전에 실패하는 테스트를 먼저 작성한다.",
+    ("test_discipline", "test_after"): "구현 직후 같은 변경 안에서 테스트를 추가한다.",
+    ("test_discipline", "on_request"): "테스트는 명시적으로 요청받았을 때만 작성한다.",
+    ("comment_doc", "minimal"): "주석은 비자명한 로직에만 남긴다.",
+    ("comment_doc", "docstring_only"): "공개 함수와 클래스에는 docstring만 쓰고 인라인 주석은 남기지 않는다.",
+    ("comment_doc", "thorough"): "공개 API의 docstring과 핵심 분기의 인라인 주석을 함께 작성한다.",
+    ("error_behavior", "stop_and_report"): "에러가 나면 즉시 멈추고 원문 로그와 함께 보고한다.",
+    ("error_behavior", "retry_then_report"): "에러가 나면 한 번만 재시도하고 실패하면 로그와 함께 보고한다.",
+    ("error_behavior", "self_heal"): "에러가 나면 원인을 고쳐 통과할 때까지 진행한 뒤 결과를 보고한다.",
+    ("scope_adherence", "strict"): "요청받은 범위 밖의 파일은 수정하지 않는다.",
+    ("scope_adherence", "adjacent_fix_ok"): "요청 범위와 직접 맞닿은 결함까지만 함께 고친다.",
+    ("scope_adherence", "proactive"): "작업 중 발견한 개선점은 같은 변경에 포함해 처리한다.",
+}
+
+# POPPER.md 본문에 절대 실려서는 안 되는 인식론 어휘.
+EPISTEMIC_TOKENS: tuple[str, ...] = (
+    "corroboration",
+    "corroborated",
+    "grade",
+    "untested",
+    "unstable",
+    "mined-prior",
+    "mined prior",
+    "elicited",
+    "provenance",
+    "n=0",
+    "미시험",
+    "무차별",
+    "불안정",
+    "판별시험",
+    "반증",
+    "추측",
+    "가설",
+    "prior",
+    "TODO",
+)
+
+
+class CompileViolation(ValueError):
+    """컴파일 입력이 스키마를 위반했을 때."""
+
+
+class HashMismatch(RuntimeError):
+    """마지막 쓰기 content hash와 디스크 현재 내용이 다를 때 - silent overwrite 금지."""
+
+    def __init__(self, records: Sequence[Mapping[str, Any]]) -> None:
+        self.records = tuple(dict(record) for record in records)
+        paths = ", ".join(str(record.get("path")) for record in self.records)
+        super().__init__(f"content hash mismatch: {paths}")
+
+
+@dataclass(frozen=True, slots=True)
+class CompiledRule:
+    """POPPER.md 한 줄과 manifest 한 항목이 공유하는 단일 룰."""
+
+    axis: str
+    value: str
+    text: str
+    corroboration_grade: str
+    value_source: str
+    surviving: tuple[str, ...]
+    eliminated: tuple[str, ...]
+    provenance: tuple[str, ...] = ()
+    pair_struck: bool = False
+    demoted: bool = False
+
+    @property
+    def rule_id(self) -> str:
+        return f"{CATALOG_VERSION}:{self.axis}:{self.value}"
+
+    @property
+    def grade_label(self) -> str:
+        return GRADE_LABELS[self.corroboration_grade]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rule_id": self.rule_id,
+            "axis": self.axis,
+            "value": self.value,
+            "rule": self.text,
+            "catalog_version": CATALOG_VERSION,
+            "corroboration_grade": self.corroboration_grade,
+            "corroboration_label": self.grade_label,
+            "value_source": self.value_source,
+            "surviving_values": list(self.surviving),
+            "eliminated_values": list(self.eliminated),
+            "refutation_provenance": list(self.provenance),
+            "pair_struck": self.pair_struck,
+            "demoted_to_untested": self.demoted,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class WriteResult:
+    """write_outputs 반환값 - 착지 경로와 방출된 manifest."""
+
+    base_dir: Path
+    manifest: dict[str, Any]
+    written: tuple[Path, ...] = ()
+    mismatches: tuple[dict[str, Any], ...] = field(default=())
+
+    def path(self, name: str) -> Path:
+        return self.base_dir / name
+
+
+def default_base_dir() -> Path:
+    """Popper 단독 소유 산출 디렉터리."""
+    return Path.home() / ".claude" / "popper"
+
+
+def _now(now: str | None = None) -> str:
+    if now is not None:
+        return now
+    return datetime.now(timezone.utc).isoformat()
+
+
+def content_hash(payload: str | bytes) -> str:
+    data = payload.encode("utf-8") if isinstance(payload, str) else payload
+    return "sha256:" + hashlib.sha256(data).hexdigest()
+
+
+def _canonical(payload: Mapping[str, Any]) -> str:
+    return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+
+
+def mined_prior_rank(axis: str, value: str) -> int:
+    """작을수록 강한 채굴 prior. 카탈로그에 없는 값은 맨 뒤로 민다."""
+    order = MINED_PRIOR.get(axis, ())
+    if value in order:
+        return order.index(value)
+    return len(order) + 1
+
+
+def mined_mode(axis: str) -> str:
+    """축의 채굴 최빈값 - 반증 이력 0건 축이 방출하는 값."""
+    order = MINED_PRIOR.get(axis)
+    if not order:
+        raise CompileViolation(f"unknown axis: {axis}")
+    return order[0]
+
+
+def select_value(axis: str, surviving: Sequence[str]) -> str:
+    """생존값 중 채굴 prior가 가장 강한 값.
+
+    생존 1개면 그 값, 생존 2개면 prior 상위값, 반증 0건(생존 3개)이면 채굴 최빈값으로
+    세 갈래가 하나의 규칙으로 수렴한다.
+    """
+    if not surviving:
+        return mined_mode(axis)
+    return min(surviving, key=lambda value: (mined_prior_rank(axis, value), value))
+
+
+def _probe_flip_axes(events: Iterable[Any]) -> frozenset[str]:
+    flipped: set[str] = set()
+    for event in events:
+        if getattr(event, "type", None) is not EventType.PROBE_RESULT:
+            continue
+        payload = getattr(event, "payload", None) or {}
+        result = str(payload.get("result", "")).strip().lower()
+        if result != "flip" and payload.get("flip") is not True:
+            continue
+        axis = payload.get("axis")
+        if axis:
+            flipped.add(str(axis))
+    return frozenset(flipped)
+
+
+def _strike_scan(events: Iterable[Any]) -> tuple[frozenset[str], dict[str, list[str]]]:
+    """pair-strike만 받은 축 후보와 축별 반증 provenance를 원본 스트림에서 긁어온다."""
+    pair_struck: set[str] = set()
+    provenance: dict[str, list[str]] = {}
+    for event in events:
+        if getattr(event, "type", None) is not EventType.STRIKE:
+            continue
+        if not getattr(event, "has_discriminating_power", False):
+            axis = getattr(event, "axis", None)
+            if axis:
+                pair_struck.add(str(axis))
+            continue
+        for refutation in getattr(event, "refutations", ()):
+            provenance.setdefault(str(refutation.axis), []).append(str(event.event_id))
+    return frozenset(pair_struck), provenance
+
+
+def _grade(
+    axis: str,
+    discrimination: str,
+    *,
+    flipped: bool,
+    pair_struck: bool,
+) -> str:
+    if flipped:
+        return GRADE_UNSTABLE
+    if discrimination == "complete":
+        return GRADE_DISCRIMINATED
+    if discrimination == "partial":
+        return GRADE_INDISCRIMINATE
+    if pair_struck:
+        return GRADE_INDISCRIMINATE
+    return GRADE_UNTESTED
+
+
+def compile_rules(
+    events: Iterable[Any],
+    catalog: AxisCatalog | None = None,
+) -> tuple[CompiledRule, ...]:
+    """이벤트 스트림에서 8축 전부의 실행 룰을 파생한다(순수 함수, 항상 8개)."""
+    stream = tuple(events)
+    active = dict(catalog) if catalog is not None else dict(DEFAULT_CATALOG)
+    state = fold(stream, catalog)
+    flipped_axes = _probe_flip_axes(stream)
+    pair_struck_axes, provenance = _strike_scan(stream)
+
+    rules: list[CompiledRule] = []
+    for axis in sorted(active):
+        axis_state = state.axis(axis)
+        surviving = tuple(axis_state.surviving)
+        value = select_value(axis, surviving)
+        text = RULE_TEXT.get((axis, value))
+        if text is None:
+            raise CompileViolation(f"no executable rule text for {axis}={value}")
+        pair_struck = axis in pair_struck_axes
+        grade = _grade(
+            axis,
+            axis_state.effective_discrimination,
+            flipped=axis in flipped_axes,
+            pair_struck=pair_struck,
+        )
+        source = SOURCE_ELICITED if axis_state.eliminated else SOURCE_MINED_PRIOR
+        rules.append(
+            CompiledRule(
+                axis=axis,
+                value=value,
+                text=text,
+                corroboration_grade=grade,
+                value_source=source,
+                surviving=surviving,
+                eliminated=tuple(axis_state.eliminated),
+                provenance=tuple(provenance.get(axis, ())),
+                pair_struck=pair_struck,
+                demoted=bool(axis_state.demoted),
+            )
+        )
+    return tuple(rules)
+
+
+def render_popper_md(rules: Sequence[CompiledRule]) -> str:
+    """실행 가능한 룰만 렌더한다 - 인식론 주석 0줄."""
+    lines = ["# Popper Rules", ""]
+    lines.extend(f"- {rule.text}" for rule in rules)
+    return "\n".join(lines) + "\n"
+
+
+def render_settings(rules: Sequence[CompiledRule]) -> str:
+    """제안 파일 - 라이브 settings.json에 자동 병합하지 않는다."""
+    payload = {
+        "_popper": {
+            "proposal_only": True,
+            "catalog_version": CATALOG_VERSION,
+            "scope": SCOPE,
+            "rules_ref": POPPER_MD,
+        },
+        "recommended_hooks": [],
+        "rule_ids": [rule.rule_id for rule in rules],
+    }
+    return _canonical(payload)
+
+
+def _recheck_queue(rules: Sequence[CompiledRule], conflicts: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    queue: list[dict[str, Any]] = []
+    for rule in rules:
+        if rule.corroboration_grade == GRADE_UNSTABLE:
+            queue.append({"class": "unstable", "axis": rule.axis, "rule_id": rule.rule_id})
+    for rule in rules:
+        if rule.corroboration_grade == GRADE_UNSTABLE:
+            continue
+        if rule.demoted or rule.corroboration_grade == GRADE_UNTESTED:
+            queue.append({"class": "untested-prior", "axis": rule.axis, "rule_id": rule.rule_id})
+    for conflict in conflicts:
+        entry = {"class": "conflict"}
+        entry.update(dict(conflict))
+        queue.append(entry)
+    for index, entry in enumerate(queue):
+        entry["priority"] = RECHECK_CLASS_PRIORITY.index(str(entry["class"]))
+        entry["order"] = index
+    return queue
+
+
+def build_manifest(
+    rules: Sequence[CompiledRule],
+    *,
+    documents: Mapping[str, str],
+    session_id: str | None = None,
+    now: str | None = None,
+    conflicts: Sequence[Mapping[str, Any]] = (),
+    prereg_ref: str = DEFAULT_PREREG_REF,
+    remaining_combinations: int | None = None,
+    eliminated_pairs: int | None = None,
+) -> dict[str, Any]:
+    """사이드카 manifest - 인식론 메타데이터, 파일 단위 content hash, last_review, scope."""
+    stamp = _now(now)
+    outputs: dict[str, Any] = {}
+    for name in OUTPUT_FILES:
+        if name == MANIFEST_JSON:
+            continue
+        body = documents.get(name)
+        if body is None:
+            continue
+        outputs[name] = {"content_hash": content_hash(body), "bytes": len(body.encode("utf-8"))}
+    outputs[MANIFEST_JSON] = {"content_hash": None, "self_excluding": True}
+
+    manifest: dict[str, Any] = {
+        "manifest_version": MANIFEST_VERSION,
+        "catalog_version": CATALOG_VERSION,
+        "metric_spec_version": METRIC_SPEC_VERSION,
+        "scope": SCOPE,
+        "session_id": session_id,
+        "generated_at": stamp,
+        "last_review": stamp,
+        "prereg_ref": prereg_ref,
+        "remaining_combinations": remaining_combinations,
+        "eliminated_pairs": eliminated_pairs,
+        "rules": [rule.to_dict() for rule in rules],
+        "outputs": outputs,
+        "conflicts": [dict(conflict) for conflict in conflicts],
+        "recheck_queue": _recheck_queue(rules, conflicts),
+    }
+    manifest["outputs"][MANIFEST_JSON]["content_hash"] = manifest_self_hash(manifest)
+    return manifest
+
+
+def manifest_self_hash(manifest: Mapping[str, Any]) -> str:
+    """manifest 자기 참조 해시 - outputs['manifest.json'].content_hash 필드를 제외하고 계산한다."""
+    shadow = json.loads(json.dumps(manifest, ensure_ascii=False, sort_keys=True))
+    entry = shadow.get("outputs", {}).get(MANIFEST_JSON)
+    if isinstance(entry, dict):
+        entry.pop("content_hash", None)
+    return content_hash(_canonical(shadow))
+
+
+def _recorded_hash(manifest: Mapping[str, Any], name: str) -> str | None:
+    entry = manifest.get("outputs", {}).get(name)
+    if not isinstance(entry, Mapping):
+        return None
+    recorded = entry.get("content_hash")
+    return str(recorded) if recorded else None
+
+
+def verify_outputs(base_dir: Path) -> tuple[dict[str, Any], ...]:
+    """디스크 현재 내용과 manifest에 적힌 마지막 쓰기 hash를 대조한다.
+
+    반환값은 hash_mismatch 이벤트 payload 목록(축 귀속 없음, arity 0)이다.
+    """
+    manifest_path = base_dir / MANIFEST_JSON
+    if not manifest_path.exists():
+        return ()
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        logger.warning("manifest 파싱 실패: %s", manifest_path, exc_info=True)
+        raise HashMismatch(
+            [{"path": str(manifest_path), "reason": "unreadable_manifest", "detail": str(exc)}]
+        ) from exc
+
+    records: list[dict[str, Any]] = []
+    for name in OUTPUT_FILES:
+        recorded = _recorded_hash(manifest, name)
+        if recorded is None:
+            continue
+        target = base_dir / name
+        if not target.exists():
+            records.append({"path": str(target), "reason": "missing", "recorded_hash": recorded})
+            continue
+        body = target.read_text(encoding="utf-8")
+        actual = manifest_self_hash(manifest) if name == MANIFEST_JSON else content_hash(body)
+        if name == MANIFEST_JSON:
+            try:
+                actual = manifest_self_hash(json.loads(body))
+            except json.JSONDecodeError as exc:
+                raise HashMismatch(
+                    [{"path": str(target), "reason": "unreadable_manifest", "detail": str(exc)}]
+                ) from exc
+        if actual != recorded:
+            records.append(
+                {
+                    "path": str(target),
+                    "reason": "manual_edit",
+                    "recorded_hash": recorded,
+                    "actual_hash": actual,
+                }
+            )
+    return tuple(records)
+
+
+def write_outputs(
+    events: Iterable[Any],
+    *,
+    catalog: AxisCatalog | None = None,
+    base_dir: Path | None = None,
+    session_id: str | None = None,
+    now: str | None = None,
+    conflicts: Sequence[Mapping[str, Any]] = (),
+    prereg_ref: str = DEFAULT_PREREG_REF,
+    acknowledge_mismatch: bool = False,
+) -> WriteResult:
+    """~/.claude/popper/ 안에만 POPPER.md + manifest.json + settings.popper.json을 착지시킨다."""
+    target_dir = Path(base_dir) if base_dir is not None else default_base_dir()
+
+    mismatches = verify_outputs(target_dir) if target_dir.exists() else ()
+    if mismatches and not acknowledge_mismatch:
+        logger.warning("content hash 불일치 - silent overwrite 금지: %s", mismatches)
+        raise HashMismatch(mismatches)
+
+    stream = tuple(events)
+    rules = compile_rules(stream, catalog)
+    state = fold(stream, catalog)
+
+    popper_md = render_popper_md(rules)
+    settings = render_settings(rules)
+    manifest = build_manifest(
+        rules,
+        documents={POPPER_MD: popper_md, SETTINGS_JSON: settings},
+        session_id=session_id,
+        now=now,
+        conflicts=conflicts,
+        prereg_ref=prereg_ref,
+        remaining_combinations=state.remaining_combinations,
+        eliminated_pairs=state.eliminated_pairs,
+    )
+    if mismatches:
+        manifest["hash_mismatch_records"] = [dict(record) for record in mismatches]
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    documents = {
+        POPPER_MD: popper_md,
+        SETTINGS_JSON: settings,
+        MANIFEST_JSON: _canonical(manifest),
+    }
+    written: list[Path] = []
+    for name in OUTPUT_FILES:
+        path = target_dir / name
+        path.write_text(documents[name], encoding="utf-8")
+        written.append(path)
+    logger.info("popper 산출물 착지: %s", target_dir)
+    return WriteResult(
+        base_dir=target_dir,
+        manifest=manifest,
+        written=tuple(written),
+        mismatches=tuple(mismatches),
+    )
