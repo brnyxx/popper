@@ -499,6 +499,8 @@ def write_outputs(
     )
     if mismatches:
         manifest["hash_mismatch_records"] = [dict(record) for record in mismatches]
+        # 기록 주입 후 자기 해시를 재계산해야 디스크 내용과 hash 대조가 다시 성립한다.
+        manifest["outputs"][MANIFEST_JSON]["content_hash"] = manifest_self_hash(manifest)
 
     target_dir.mkdir(parents=True, exist_ok=True)
     documents = {
