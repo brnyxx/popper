@@ -1,0 +1,308 @@
+"""AC7 - 세션 전체가 고정 픽스처 + 레포 읽기전용 슬롯 치환만으로 렌더되는지 검증한다.
+
+런타임 LLM/네트워크 호출 0회, slot span 맵을 통한 strike -> 축 귀속을 확인한다.
+"""
+
+from __future__ import annotations
+
+import ast
+from itertools import combinations
+from pathlib import Path
+
+import pytest
+
+from popper import fixtures as fx
+from popper.counter import DEFAULT_CATALOG
+from popper.events import Refutation
+
+
+def _pack() -> fx.FixturePack:
+    return fx.load_pack()
+
+
+def _make_python_repo(root: Path) -> Path:
+    repo = root / "repo"
+    (repo / "src").mkdir(parents=True)
+    (repo / "src" / "api.py").write_text("def api():\n    return 1\n", encoding="utf-8")
+    (repo / "src" / "util.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (repo / "manage.py").write_text("", encoding="utf-8")
+    (repo / ".git").mkdir()
+    (repo / ".git" / "config").write_text("[core]\n", encoding="utf-8")
+    (repo / "node_modules").mkdir()
+    (repo / "node_modules" / "vendor.js").write_text("x", encoding="utf-8")
+    return repo
+
+
+class TestAllAxesRenderPairs:
+    """(1) 8축 전부 3변형 페어 렌더가 가능하다."""
+
+    def test_locality_split_matches_decision_table(self) -> None:
+        # docs/axis_locality_table.md - 전역 2축 + 국소 6축.
+        assert fx.GLOBAL_AXES == ("response_language", "verbosity")
+        assert sorted(fx.LOCAL_AXES) == sorted(
+            set(DEFAULT_CATALOG) - set(fx.GLOBAL_AXES)
+        )
+        assert len(fx.LOCAL_AXES) == 6
+
+    def test_every_axis_renders_all_three_value_pairs(self) -> None:
+        pack = _pack()
+        for axis, values in DEFAULT_CATALOG.items():
+            assert len(values) == 3
+            for left_value, right_value in combinations(values, 2):
+                pair = fx.render_pair(
+                    pack, axis, left_value, right_value, fx.GENERIC_SKIN
+                )
+                assert pair.axis == axis
+                assert pair.left.text and pair.right.text
+                assert fx.contrast_span(pair.left).value == left_value
+                assert fx.contrast_span(pair.right).value == right_value
+
+    def test_render_all_pairs_covers_eight_axes_times_three_combos(self) -> None:
+        pairs = fx.render_all_pairs(_pack(), fx.GENERIC_SKIN)
+        assert len(pairs) == 24
+        assert {p.axis for p in pairs} == set(DEFAULT_CATALOG)
+
+    def test_local_render_carries_all_six_local_axes_as_slots(self) -> None:
+        pair = fx.render_pair(
+            _pack(), "autonomy", "ask_first", "act_then_report", fx.GENERIC_SKIN
+        )
+        slot_axes = {s.axis for s in pair.left.spans if s.axis is not None}
+        assert slot_axes == set(fx.LOCAL_AXES)
+
+
+class TestRenderDeterminism:
+    """(2) 같은 입력이면 같은 출력이다 - 타임스탬프/난수 오염 없음."""
+
+    def test_same_inputs_render_identical_pairs(self, tmp_path: Path) -> None:
+        repo = _make_python_repo(tmp_path)
+        skin_a = fx.scan_repo_skin(repo)
+        skin_b = fx.scan_repo_skin(repo)
+        assert skin_a == skin_b
+
+        first = fx.render_pair(
+            fx.load_pack(), "autonomy", "ask_first", "act_then_report", skin_a
+        )
+        second = fx.render_pair(
+            fx.load_pack(), "autonomy", "ask_first", "act_then_report", skin_b
+        )
+        assert first == second
+        assert first.pair_id == "scn-pagination-fix:autonomy:ask_first|act_then_report"
+
+    def test_global_axis_render_is_deterministic(self) -> None:
+        pack = _pack()
+        first = fx.render_pair(pack, "verbosity", "terse", "explanatory", fx.GENERIC_SKIN)
+        second = fx.render_pair(pack, "verbosity", "terse", "explanatory", fx.GENERIC_SKIN)
+        assert first == second
+
+
+class TestSpanReverseAttribution:
+    """(3) slot span 맵으로 임의 span -> 축 역귀속이 보장된다."""
+
+    def test_any_span_inside_a_slot_attributes_to_its_axis(self) -> None:
+        pair = fx.render_pair(
+            _pack(), "commit_style", "conventional", "narrative", fx.GENERIC_SKIN
+        )
+        for transcript in (pair.left, pair.right):
+            for span in transcript.spans:
+                if span.axis is None:
+                    continue
+                middle = (span.start + span.end) // 2
+                assert fx.attribute_span(transcript, span.start, span.end) == span
+                refutation = fx.refutation_for_span(transcript, middle, middle + 1)
+                assert isinstance(refutation, Refutation)
+                assert refutation.axis == span.axis
+                assert refutation.value == span.value
+                assert refutation.fragment_id == span.fragment_id
+                assert refutation.side == transcript.side
+
+    def test_fragment_id_attributes_through_span_map(self) -> None:
+        pair = fx.render_pair(
+            _pack(), "test_discipline", "test_first", "on_request", fx.GENERIC_SKIN
+        )
+        span = fx.contrast_span(pair.left)
+        refutation = fx.refutation_for_fragment(pair.left, span.fragment_id)
+        assert refutation.axis == "test_discipline"
+        assert refutation.value == "test_first"
+
+    def test_static_fragment_never_attributes_to_an_axis(self) -> None:
+        pair = fx.render_pair(
+            _pack(), "autonomy", "ask_first", "propose_then_act", fx.GENERIC_SKIN
+        )
+        static = next(s for s in pair.left.spans if s.role == fx.ROLE_STATIC)
+        with pytest.raises(fx.FixtureViolation):
+            fx.refutation_for_span(pair.left, static.start, static.end)
+
+    def test_cross_slot_span_is_rejected(self) -> None:
+        pair = fx.render_pair(
+            _pack(), "autonomy", "ask_first", "propose_then_act", fx.GENERIC_SKIN
+        )
+        first, second = pair.left.spans[0], pair.left.spans[1]
+        with pytest.raises(fx.FixtureViolation):
+            fx.attribute_span(pair.left, first.end - 1, second.start + 1)
+
+    def test_separator_gap_offset_is_rejected(self) -> None:
+        pair = fx.render_pair(
+            _pack(), "autonomy", "ask_first", "propose_then_act", fx.GENERIC_SKIN
+        )
+        gap_offset = pair.left.spans[0].end  # 조각 사이 구분자 시작 위치
+        with pytest.raises(fx.FixtureViolation):
+            fx.span_at(pair.left, gap_offset)
+
+
+class TestPairContrastConfinement:
+    """(4) 좌우 페어는 대비 축 슬롯만 다르고 나머지는 동일하다."""
+
+    def test_local_axis_pair_differs_only_inside_contrast_slot(self) -> None:
+        pack = _pack()
+        for axis in fx.LOCAL_AXES:
+            values = DEFAULT_CATALOG[axis]
+            pair = fx.render_pair(pack, axis, values[0], values[2], fx.GENERIC_SKIN)
+            left_span = fx.contrast_span(pair.left)
+            right_span = fx.contrast_span(pair.right)
+
+            assert pair.left.text[: left_span.start] == pair.right.text[: right_span.start]
+            assert pair.left.text[left_span.end :] == pair.right.text[right_span.end :]
+            assert (
+                pair.left.text[left_span.start : left_span.end]
+                != pair.right.text[right_span.start : right_span.end]
+            )
+
+    def test_background_slots_share_mined_mode_values_on_both_sides(self) -> None:
+        pair = fx.render_pair(
+            _pack(), "error_behavior", "stop_and_report", "self_heal", fx.GENERIC_SKIN
+        )
+        for left_span, right_span in zip(pair.left.spans, pair.right.spans):
+            if left_span.role != fx.ROLE_BACKGROUND:
+                continue
+            assert right_span.role == fx.ROLE_BACKGROUND
+            assert left_span.axis == right_span.axis
+            assert left_span.value == right_span.value
+            # 배경 슬롯은 채굴 최빈값(카탈로그 index 0)으로 고정된다.
+            assert left_span.value == DEFAULT_CATALOG[left_span.axis][0]
+
+    def test_global_axis_pair_shares_static_user_fragment(self) -> None:
+        pack = _pack()
+        for axis in fx.GLOBAL_AXES:
+            values = DEFAULT_CATALOG[axis]
+            pair = fx.render_pair(pack, axis, values[0], values[1], fx.GENERIC_SKIN)
+            left_static, right_static = pair.left.spans[0], pair.right.spans[0]
+            assert left_static.role == right_static.role == fx.ROLE_STATIC
+            assert (
+                pair.left.text[left_static.start : left_static.end]
+                == pair.right.text[right_static.start : right_static.end]
+            )
+            # 통짜 본문만 다르다.
+            left_whole = fx.contrast_span(pair.left)
+            right_whole = fx.contrast_span(pair.right)
+            assert left_whole.fragment_id.startswith(f"whole-{axis}:")
+            assert (
+                pair.left.text[left_whole.start :]
+                != pair.right.text[right_whole.start :]
+            )
+
+
+class TestRepoSkinSubstitution:
+    """(5) 레포 읽기전용 스캔으로 스킨 치환하고, 빈/비코드 레포는 폴백한다."""
+
+    def test_python_repo_skin_is_scanned_from_names_only(self, tmp_path: Path) -> None:
+        repo = _make_python_repo(tmp_path)
+        skin = fx.scan_repo_skin(repo)
+        assert skin.lang == "Python"
+        assert skin.framework == "Django"  # manage.py 마커
+        assert skin.file == "manage.py"  # 지배 확장자 중 최상위 경로
+        assert skin.generic is False
+
+    def test_rendered_text_substitutes_all_skin_placeholders(
+        self, tmp_path: Path
+    ) -> None:
+        repo = _make_python_repo(tmp_path)
+        skin = fx.scan_repo_skin(repo)
+        pair = fx.render_pair(
+            fx.load_pack(), "commit_style", "conventional", "no_auto_commit", skin
+        )
+        for transcript in (pair.left, pair.right):
+            assert "manage.py" in transcript.text
+            assert "Python" in transcript.text
+            assert "Django" in transcript.text
+            for placeholder in fx.SKIN_PLACEHOLDERS:
+                assert placeholder not in transcript.text
+
+    def test_empty_repo_falls_back_to_generic_skin(self, tmp_path: Path) -> None:
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        assert fx.scan_repo_skin(empty) == fx.GENERIC_SKIN
+
+    def test_non_code_repo_falls_back_to_generic_skin(self, tmp_path: Path) -> None:
+        noncode = tmp_path / "noncode"
+        noncode.mkdir()
+        (noncode / "notes.txt").write_text("메모", encoding="utf-8")
+        (noncode / "data.csv").write_text("a,b\n", encoding="utf-8")
+        assert fx.scan_repo_skin(noncode) == fx.GENERIC_SKIN
+
+    def test_missing_repo_root_falls_back_to_generic_skin(
+        self, tmp_path: Path
+    ) -> None:
+        assert fx.scan_repo_skin(tmp_path / "no-such-dir") == fx.GENERIC_SKIN
+
+    def test_generic_skin_still_renders_full_session(self) -> None:
+        pairs = fx.render_all_pairs(_pack(), fx.GENERIC_SKIN)
+        for pair in pairs:
+            assert "README.md" in pair.left.text
+            for placeholder in fx.SKIN_PLACEHOLDERS:
+                assert placeholder not in pair.left.text
+
+
+class TestOfflineGuarantee:
+    """(6) fixtures.py 소스에 네트워크/서브프로세스 import가 없다 - 정적 검사."""
+
+    FORBIDDEN_ROOTS = frozenset(
+        {
+            "urllib",
+            "socket",
+            "subprocess",
+            "http",
+            "requests",
+            "ssl",
+            "ftplib",
+            "smtplib",
+            "telnetlib",
+            "xmlrpc",
+            "aiohttp",
+            "httpx",
+        }
+    )
+    ALLOWED_ROOTS = frozenset(
+        {
+            "__future__",
+            "collections",
+            "dataclasses",
+            "itertools",
+            "json",
+            "logging",
+            "pathlib",
+            "popper",
+            "typing",
+        }
+    )
+
+    @staticmethod
+    def _import_roots() -> set[str]:
+        source = Path(fx.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        roots: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                roots.update(alias.name.split(".")[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                roots.add(node.module.split(".")[0])
+        return roots
+
+    def test_no_network_or_subprocess_imports(self) -> None:
+        roots = self._import_roots()
+        assert roots.isdisjoint(self.FORBIDDEN_ROOTS), sorted(
+            roots & self.FORBIDDEN_ROOTS
+        )
+
+    def test_only_stdlib_and_popper_imports(self) -> None:
+        roots = self._import_roots()
+        assert roots <= self.ALLOWED_ROOTS, sorted(roots - self.ALLOWED_ROOTS)
