@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Popper - 긋기</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --surface: #171a21;
+    --surface-2: #1e222b;
+    --line: #2a2f3a;
+    --text: #e6e8ee;
+    --text-2: #9aa2b1;
+    --text-3: #6c7484;
+    --mark: #e5484d;
+    --accent: #6e9fff;
+    --gap: 16px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo",
+                 "Pretendard", "Noto Sans KR", "Malgun Gothic", sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    display: flex;
+    flex-direction: column;
+  }
+  .bar {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--gap);
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--line);
+    background: var(--surface);
+  }
+  .brand {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+  }
+  .counter {
+    display: flex;
+    margin: 0;
+    gap: 32px;
+  }
+  .metric { text-align: right; }
+  .metric dt {
+    margin: 0;
+    font-size: 14px;
+    color: var(--text-3);
+  }
+  .metric dd {
+    margin: 0;
+    font-size: 28px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  main {
+    flex: 1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 360px;
+    gap: 24px;
+    padding: 24px;
+    align-items: start;
+  }
+  .stage { min-width: 0; }
+  .axis {
+    margin: 0 0 4px;
+    font-size: 14px;
+    color: var(--text-3);
+  }
+  .axis strong {
+    color: var(--accent);
+    font-size: 16px;
+  }
+  .hint {
+    margin: 0 0 16px;
+    font-size: 14px;
+    color: var(--text-2);
+  }
+  .panes {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: var(--gap);
+  }
+  .pane {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+    cursor: crosshair;
+    transition: border-color 150ms ease-out, background 150ms ease-out;
+  }
+  .pane:hover, .pane:focus-visible {
+    border-color: var(--mark);
+    background: var(--surface-2);
+  }
+  .pane:hover .transcript, .pane:focus-visible .transcript {
+    text-decoration: line-through;
+    text-decoration-color: var(--mark);
+    text-decoration-thickness: 2px;
+  }
+  .pane-label {
+    margin: 0 0 8px;
+    font-size: 13px;
+    letter-spacing: 0.08em;
+    color: var(--text-3);
+  }
+  .transcript {
+    margin: 0;
+    white-space: pre-wrap;
+    font-size: 15px;
+  }
+  .extra {
+    display: flex;
+    gap: 8px;
+    margin-top: var(--gap);
+    flex-wrap: wrap;
+  }
+  .strike {
+    font: inherit;
+    font-size: 14px;
+    color: var(--text-2);
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 8px 16px;
+    cursor: crosshair;
+    transition: border-color 150ms ease-out, color 150ms ease-out;
+  }
+  .strike:hover, .strike:focus-visible {
+    border-color: var(--mark);
+    color: var(--text);
+  }
+  .compile {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px;
+    position: sticky;
+    top: 24px;
+  }
+  .compile h2 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 700;
+  }
+  .compile p {
+    margin: 0 0 16px;
+    font-size: 13px;
+    color: var(--text-3);
+  }
+  .rules {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .rules li {
+    border-left: 2px solid var(--line);
+    padding-left: 12px;
+  }
+  .rule-axis {
+    display: block;
+    font-size: 12px;
+    color: var(--text-3);
+  }
+  .rule-text {
+    display: block;
+    font-size: 14px;
+    color: var(--text);
+  }
+  @media (max-width: 900px) {
+    main { grid-template-columns: minmax(0, 1fr); }
+    .compile { position: static; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .pane, .strike { transition: none; }
+  }
+</style>
+</head>
+<body>
+<header class="bar">
+  <h1 class="brand">Popper</h1>
+  <dl class="counter">
+    <div class="metric">
+      <dt>남은 가설 조합</dt>
+      <dd id="remaining">{{REMAINING}}</dd>
+    </div>
+    <div class="metric">
+      <dt>제거된 축과 값의 쌍</dt>
+      <dd id="eliminated">{{ELIMINATED}}</dd>
+    </div>
+  </dl>
+</header>
+
+<main>
+  <section class="stage">
+    <p class="axis">대비 축 <strong id="axis-label">{{AXIS_LABEL}}</strong></p>
+    <p class="hint">틀렸다고 보이는 쪽을 그어라. 그은 값은 가설 공간에서 곧바로 빠지고, 오른쪽 컴파일 페인의 룰이 그 자리에서 다시 쓰인다.</p>
+
+    <div class="panes">
+      <article class="pane" data-strike-target="left" role="button" tabindex="0" aria-label="왼쪽 긋기">
+        <p class="pane-label">왼쪽</p>
+        <p class="transcript" id="left-text">{{LEFT_TEXT}}</p>
+      </article>
+      <article class="pane" data-strike-target="right" role="button" tabindex="0" aria-label="오른쪽 긋기">
+        <p class="pane-label">오른쪽</p>
+        <p class="transcript" id="right-text">{{RIGHT_TEXT}}</p>
+      </article>
+    </div>
+
+    <div class="extra">
+      <button type="button" class="strike" data-strike-target="both">양쪽 모두 긋기</button>
+      <button type="button" class="strike" data-strike-target="pair">이 페어 통째로 긋기</button>
+    </div>
+  </section>
+
+  <aside class="compile" aria-label="컴파일 페인">
+    <h2>컴파일 페인</h2>
+    <p>지금 이벤트 스트림에서 파생된 여덟 축의 실행 룰</p>
+    <ol id="rules" class="rules">{{RULES}}</ol>
+  </aside>
+</main>
+
+<script id="popper-boot" type="application/json">{{BOOT_JSON}}</script>
+<script>
+(function () {
+  "use strict";
+
+  var busy = false;
+
+  function paint(state) {
+    document.getElementById("remaining").textContent =
+      state.remaining_combinations.toLocaleString("ko-KR");
+    document.getElementById("eliminated").textContent =
+      String(state.eliminated_pairs);
+    document.getElementById("axis-label").textContent = state.pair.axis_label;
+    document.getElementById("left-text").textContent = state.pair.left_text;
+    document.getElementById("right-text").textContent = state.pair.right_text;
+
+    var list = document.getElementById("rules");
+    list.replaceChildren();
+    state.rules.forEach(function (rule) {
+      var item = document.createElement("li");
+      var axis = document.createElement("span");
+      axis.className = "rule-axis";
+      axis.textContent = rule.axis_label;
+      var body = document.createElement("span");
+      body.className = "rule-text";
+      body.textContent = rule.text;
+      item.append(axis, body);
+      list.append(item);
+    });
+  }
+
+  function draw(target) {
+    if (busy) {
+      return;
+    }
+    busy = true;
+    fetch("/strike", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ target: target })
+    }).then(function (res) {
+      if (!res.ok) {
+        throw new Error("긋기가 기각됐다");
+      }
+      return res.json();
+    }).then(paint).catch(function (err) {
+      console.error(err);
+    }).finally(function () {
+      busy = false;
+    });
+  }
+
+  document.querySelectorAll("[data-strike-target]").forEach(function (el) {
+    var target = el.getAttribute("data-strike-target");
+    el.addEventListener("click", function () {
+      draw(target);
+    });
+    el.addEventListener("keydown", function (ev) {
+      if (ev.key === "Enter" || ev.key === " ") {
+        ev.preventDefault();
+        draw(target);
+      }
+    });
+  });
+
+  paint(JSON.parse(document.getElementById("popper-boot").textContent));
+})();
+</script>
+</body>
+</html>
