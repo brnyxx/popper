@@ -282,7 +282,19 @@ def fold_recovery(
 
             active[key] = event.event_id
             session_of[event.event_id] = event.session_id
-            applied: list[tuple[str, str]] = []
+            # 같은 조합의 재재긋기 - tombstone이 남긴 pending을 소비해 반증을 재활성화한다.
+            reactivated: list[tuple[str, str]] = []
+            for tomb in reversed(tombstones):
+                if tomb.key != key:
+                    continue
+                for axis, value in tomb.voided_pairs:
+                    if pending.pop((tomb.strike_event_id, axis, value), None) is None:
+                        continue
+                    work[axis].refutation_count += 1
+                    reactivated.append((axis, value))
+                if reactivated:
+                    break
+            applied: list[tuple[str, str]] = list(reactivated)
             for refutation in event.refutations:
                 axis = refutation.axis
                 if axis not in work:
