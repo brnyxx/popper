@@ -1,7 +1,7 @@
 {
   "name": "popper",
   "displayName": "Popper",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "반증(긋기)만으로 Claude Code 설정을 수렴시키는 도구 - 질문 0개, 승인 0개, 로컬 웹 UI 한 장",
   "author": {
     "name": "kim62210"

@@ -29,7 +29,7 @@ def test_plugin_marketplace_and_package_versions_match() -> None:
 
     assert marketplace["name"] == "popper-marketplace"
     assert entry["name"] == plugin["name"] == "popper"
-    assert entry["version"] == plugin["version"] == "1.0.0"
+    assert entry["version"] == plugin["version"] == "1.1.0"
     assert entry["source"] == "./"
     assert f'version = "{plugin["version"]}"' in (
         ROOT / "pyproject.toml"

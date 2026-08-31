@@ -50,11 +50,17 @@ def test_clean_plugin_browser(page, tmp_path: Path) -> None:
     )
     installed = json.loads(listed.stdout)
     assert plugin_id in json.dumps(installed)
+    plugin_version = json.loads(
+        (repo / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8")
+    )["version"]
     cache = home / ".claude" / "plugins" / "cache"
     candidates = [
         p
         for p in cache.rglob("*")
-        if p.is_dir() and p.name == "1.0.0" and marketplace in p.parts and "popper" in p.parts
+        if p.is_dir()
+        and p.name == plugin_version
+        and marketplace in p.parts
+        and "popper" in p.parts
     ]
     assert candidates, f"plugin cache version not found under {cache}"
 

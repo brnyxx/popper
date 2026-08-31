@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "popper"
-version = "1.0.0"
+version = "1.1.0"
 description = "반증(긋기)만으로 Claude Code 설정을 수렴시키는 도구 - 런타임 LLM/네트워크 호출 0회"
 readme = "README.md"
 requires-python = ">=3.10"
