@@ -1,4 +1,7 @@
 .pytest_cache/
 __pycache__/
 *.pyc
+*.egg-info/
+build/
+.gjc/
 .ouroboros_eval_artifact.md

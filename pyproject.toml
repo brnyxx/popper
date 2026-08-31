@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "popper"
+version = "1.0.0"
+description = "반증(긋기)만으로 Claude Code 설정을 수렴시키는 도구 - 런타임 LLM/네트워크 호출 0회"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.scripts]
+popper = "popper.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["popper*"]
+
+[tool.setuptools.package-data]
+"popper.web" = ["index.html"]
+"popper" = [
+    "_data/fixtures/*.json",
+    "_data/ground_truth/*.sha256",
+    "_data/ground_truth/*.txt",
+    "_data/prereg/*.txt",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

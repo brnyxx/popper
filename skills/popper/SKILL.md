@@ -1,0 +1,56 @@
+---
+description: 반증(긋기)만으로 Claude Code 설정을 수렴시키는 로컬 웹 UI를 연다. 설정 인터뷰/질문 대신 대비 페어 트랜스크립트를 긋는다. 사용자가 "popper", "긋기 세션", "설정 수렴", "재심(recheck)"을 요청할 때 사용.
+argument-hint: "[open|recheck|status|validate]"
+disable-model-invocation: true
+allowed-tools: 'Bash(cd "${CLAUDE_PLUGIN_ROOT}"), Bash(python3 *)'
+---
+
+# Popper - 긋기 세션
+
+Popper는 질문 대신 반증 가능한 대비 페어를 제시하고, 사용자의 유일한 동사인
+"긋기"만으로 Claude Code 설정(8축 가설 공간 6,561조합)을 수렴시킨다.
+세션 런타임에 LLM 호출 0회, 네트워크 호출 0회다.
+
+## 현재 상태
+
+- 착지/재심 현황은 아래 `status` 명령으로 확인한다.
+
+## 실행 규칙
+
+`status` 외 인자를 실행하기 전에는 반드시
+`cd "${CLAUDE_PLUGIN_ROOT}" && python3 -m popper status`를 먼저 실행해
+재심 대기 배너를 확인하고, 배너가 있으면 사용자에게 한 줄로 전달한다.
+
+그 뒤 인자 `$ARGUMENTS`에 따라 아래 명령을 **백그라운드로** 실행하고, 로그에 찍힌
+`긋기 화면: http://127.0.0.1:<port>/` URL을 사용자에게 알려준다. 서버는
+사용자가 세션을 마칠 때까지 떠 있어야 하므로 포그라운드로 실행하지 않는다.
+
+| 인자 | 명령 | 설명 |
+|---|---|---|
+| (없음) 또는 `open` | `cd "${CLAUDE_PLUGIN_ROOT}" && python3 -m popper open --no-browser` | 일반 세션 (15긋기, 완주 시 ~/.claude/popper/ 착지) |
+| `recheck` | `cd "${CLAUDE_PLUGIN_ROOT}" && python3 -m popper recheck --no-browser` | 4막 경량 재심 (5-7긋기, 재심 큐 선두) |
+| `validate` | `cd "${CLAUDE_PLUGIN_ROOT}" && python3 -m popper validate --no-browser` | 검증 세션 (판별 13 + 미러 프로브 2) |
+| `status` | `cd "${CLAUDE_PLUGIN_ROOT}" && python3 -m popper status` | 착지/재심 배너/자기반증 판정 요약 (서버 없음) |
+
+현재 작업 중인 레포의 맥락으로 페어를 렌더하려면 `--repo <프로젝트 경로>`를
+붙인다 (읽기전용 스캔, 파일 내용은 읽지 않는다).
+
+## 위 상태 출력에 "재심 대기 N건" 배너가 있으면
+
+세션을 열기 전에 사용자에게 배너 내용을 한 줄로 전달하고, `popper recheck`로
+재심에 들어갈 수 있다고 안내한다. 수락 여부는 사용자가 정한다 - 대신 결정하지
+않는다.
+
+## 세션이 끝나면
+
+- 산출물은 `~/.claude/popper/` 단독 소유 디렉토리에만 착지한다
+  (POPPER.md + manifest.json + settings.popper.json).
+- 사용자 CLAUDE.md 활성화는 `python3 -m popper enable --grant`로만 하며
+  @import 한 줄만 추가된다. 사용자가 명시적으로 요청할 때만 실행한다.
+- 롤백은 `python3 -m popper rollback` (그 한 줄만 제거).
+
+## 하지 말 것
+
+- 사용자 대신 긋지 않는다 - 긋기는 사용자의 반증 행위다.
+- CLAUDE.md나 settings.json을 직접 편집하지 않는다 - Popper의 소유권 계약 위반이다.
+- 서버 로그의 URL 외 다른 방법으로 세션 상태를 조작하지 않는다.
