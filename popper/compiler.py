@@ -15,8 +15,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
+from popper.atomic import atomic_write_text
 from popper.counter import DEFAULT_CATALOG, AxisCatalog, fold
 from popper.events import EventType
+from popper.locking import base_lock
 
 logger = logging.getLogger(__name__)
 
@@ -462,7 +464,7 @@ def verify_outputs(base_dir: Path) -> tuple[dict[str, Any], ...]:
     return tuple(records)
 
 
-def write_outputs(
+def _write_outputs_unlocked(
     events: Iterable[Any],
     *,
     catalog: AxisCatalog | None = None,
@@ -508,15 +510,42 @@ def write_outputs(
         SETTINGS_JSON: settings,
         MANIFEST_JSON: _canonical(manifest),
     }
-    written: list[Path] = []
-    for name in OUTPUT_FILES:
+    written_by_name: dict[str, Path] = {}
+    # manifest를 마지막에 교체해 세 파일 세대의 commit marker로 사용한다.
+    for name in (POPPER_MD, SETTINGS_JSON, MANIFEST_JSON):
         path = target_dir / name
-        path.write_text(documents[name], encoding="utf-8")
-        written.append(path)
+        atomic_write_text(path, documents[name])
+        written_by_name[name] = path
     logger.info("popper 산출물 착지: %s", target_dir)
     return WriteResult(
         base_dir=target_dir,
         manifest=manifest,
-        written=tuple(written),
+        written=tuple(written_by_name[name] for name in OUTPUT_FILES),
         mismatches=tuple(mismatches),
     )
+
+
+def write_outputs(
+    events: Iterable[Any],
+    *,
+    catalog: AxisCatalog | None = None,
+    base_dir: Path | None = None,
+    session_id: str | None = None,
+    now: str | None = None,
+    conflicts: Sequence[Mapping[str, Any]] = (),
+    prereg_ref: str = DEFAULT_PREREG_REF,
+    acknowledge_mismatch: bool = False,
+) -> WriteResult:
+    """누적 스트림 판독부터 세 파일 착지까지 프로세스 간 단일 트랜잭션으로 실행한다."""
+    target_dir = Path(base_dir) if base_dir is not None else default_base_dir()
+    with base_lock(target_dir):
+        return _write_outputs_unlocked(
+            events,
+            catalog=catalog,
+            base_dir=target_dir,
+            session_id=session_id,
+            now=now,
+            conflicts=conflicts,
+            prereg_ref=prereg_ref,
+            acknowledge_mismatch=acknowledge_mismatch,
+        )

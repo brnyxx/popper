@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from popper.atomic import atomic_write_bytes, atomic_write_text
 from popper.compiler import (
     MANIFEST_JSON,
     MANIFEST_VERSION,
@@ -29,6 +30,7 @@ from popper.compiler import (
     default_base_dir,
 )
 from popper.conflict import ConsentKind, ConsentRecord
+from popper.locking import base_lock, target_lock
 
 logger = logging.getLogger(__name__)
 
@@ -162,9 +164,8 @@ class OwnedWriter:
     def write_file(self, name: str | Path, body: str) -> Path:
         """소유 디렉토리 내부에만 쓴다 - 밖이면 OwnershipViolation."""
         target = self._guard(name)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(body, encoding="utf-8")
-        return target
+        with base_lock(self.base_dir):
+            return atomic_write_text(target, body)
 
     def detect_manual_edits(self) -> tuple[ManualEditDetection, ...]:
         """manifest의 마지막 쓰기 해시와 디스크 내용을 대조한다."""
@@ -218,7 +219,7 @@ class OwnedWriter:
                 )
         return tuple(detections)
 
-    def write_outputs(
+    def _write_outputs_unlocked(
         self,
         documents: Mapping[str, str],
         *,
@@ -255,7 +256,19 @@ class OwnedWriter:
         logger.info("popper 산출물 착지: %s", self.base_dir)
         return WriteOutcome(base_dir=self.base_dir, written=tuple(written))
 
-    def ensure_import(self, permission: ConsentRecord | None = None) -> ImportOutcome:
+    def write_outputs(
+        self,
+        documents: Mapping[str, str],
+        *,
+        now: str | None = None,
+    ) -> WriteOutcome:
+        """감지와 전체 산출물 교체를 하나의 프로세스 간 임계 구역에서 수행한다."""
+        with base_lock(self.base_dir):
+            return self._write_outputs_unlocked(documents, now=now)
+
+    def _ensure_import_unlocked(
+        self, permission: ConsentRecord | None = None
+    ) -> ImportOutcome:
         """@import 한 줄을 CLAUDE.md 끝에 추가한다(멱등).
 
         import_permission_granted 동의 레코드(subject=CLAUDE.md 경로)가 전달될
@@ -296,11 +309,16 @@ class OwnedWriter:
             )
 
         separator = b"" if (not data or data.endswith(b"\n")) else b"\n"
-        target.write_bytes(data + separator + encoded + b"\n")
+        atomic_write_bytes(target, data + separator + encoded + b"\n")
         logger.info("CLAUDE.md @import 추가: %s", target)
         return ImportOutcome(path=target, line=line, changed=True, reason=IMPORT_ADDED)
 
-    def remove_import(self) -> ImportOutcome:
+    def ensure_import(self, permission: ConsentRecord | None = None) -> ImportOutcome:
+        """CLAUDE.md 판독과 원자 교체를 대상 파일 잠금 안에서 수행한다."""
+        with target_lock(self.claude_md_path):
+            return self._ensure_import_unlocked(permission)
+
+    def _remove_import_unlocked(self) -> ImportOutcome:
         """@import 한 줄 제거 - 전체 롤백 지점. 그 한 줄만 걷어낸다."""
         line = self.import_line()
         target = self.claude_md_path
@@ -316,6 +334,11 @@ class OwnedWriter:
             return ImportOutcome(
                 path=target, line=line, changed=False, reason=IMPORT_NOT_PRESENT
             )
-        target.write_bytes(b"\n".join(seg for seg in segments if seg != encoded))
+        atomic_write_bytes(target, b"\n".join(seg for seg in segments if seg != encoded))
         logger.info("CLAUDE.md @import 제거(롤백): %s", target)
         return ImportOutcome(path=target, line=line, changed=True, reason=IMPORT_REMOVED)
+
+    def remove_import(self) -> ImportOutcome:
+        """CLAUDE.md 롤백을 대상 파일 잠금 안에서 원자 수행한다."""
+        with target_lock(self.claude_md_path):
+            return self._remove_import_unlocked()

@@ -52,6 +52,7 @@ from popper.judgment import (
     DISCRIMINATIVE_INSTANCES_KEY,
     MIS_RESTORATIONS_KEY,
 )
+from popper.locking import base_lock
 from popper.events import (
     Event,
     EventLog,
@@ -831,16 +832,23 @@ class ColdOpenSession:
         if self._land_dir is None:
             return LandingView(status=LANDING_SKIPPED, detail="착지 디렉토리 미지정")
 
-        conflicts: Sequence[Mapping[str, Any]] = ()
-        if self._conflicts_for is not None:
-            conflicts = self._conflicts_for(compile_rules(self._all_events()))
         try:
-            result = write_outputs(
-                self._all_events(),
-                base_dir=self._land_dir,
-                session_id=self._session_id,
-                conflicts=conflicts,
-            )
+            lock = self._store.lock if self._store is not None else base_lock(self._land_dir)
+            with lock:
+                events = (
+                    self._store.load_completed()
+                    if self._store is not None
+                    else self._all_events()
+                )
+                conflicts: Sequence[Mapping[str, Any]] = ()
+                if self._conflicts_for is not None:
+                    conflicts = self._conflicts_for(compile_rules(events))
+                result = write_outputs(
+                    events,
+                    base_dir=self._land_dir,
+                    session_id=self._session_id,
+                    conflicts=conflicts,
+                )
         except HashMismatch as e:
             records = tuple(dict(r) for r in e.records)
             logger.warning("착지 차단 - 수기 편집 감지: %s", records)

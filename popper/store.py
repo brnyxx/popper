@@ -27,6 +27,7 @@ from popper.events import (
     StrikeEvent,
     StrikeTarget,
 )
+from popper.locking import base_lock
 
 logger = logging.getLogger(__name__)
 
@@ -96,19 +97,21 @@ class EventStore:
         root = Path(base_dir) if base_dir is not None else default_base_dir()
         self.base_dir = root
         self.sessions_dir = root / SESSIONS_DIR
+        self.lock = base_lock(root)
 
     def session_path(self, session_id: str) -> Path:
         return self.sessions_dir / f"{_validate_session_id(session_id)}{EVENT_FILE_SUFFIX}"
 
     def append(self, event: StrikeEvent | Event) -> Path:
         """이벤트 한 건을 해당 세션 파일 끝에 덧붙인다 - 유일한 쓰기 경로."""
-        path = self.session_path(event.session_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(event.to_dict(), ensure_ascii=False, sort_keys=True)
-        with path.open("a", encoding="utf-8") as f:
-            f.write(line + "\n")
-            f.flush()
-            os.fsync(f.fileno())
+        with self.lock:
+            path = self.session_path(event.session_id)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            line = json.dumps(event.to_dict(), ensure_ascii=False, sort_keys=True)
+            with path.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+                f.flush()
+                os.fsync(f.fileno())
         return path
 
     def _read(self, path: Path) -> Iterator[StrikeEvent | Event]:
@@ -132,28 +135,53 @@ class EventStore:
 
     def load_session(self, session_id: str) -> tuple[StrikeEvent | Event, ...]:
         """세션 하나의 이벤트 열 - 파일이 없으면 빈 스트림이다."""
-        path = self.session_path(session_id)
-        if not path.exists():
-            return ()
-        return tuple(self._read(path))
+        with self.lock:
+            path = self.session_path(session_id)
+            if not path.exists():
+                return ()
+            return tuple(self._read(path))
 
     def session_ids(self) -> tuple[str, ...]:
         """저장된 세션 식별자 - 파일시스템 메타데이터에 의존하지 않는 순서."""
-        if not self.sessions_dir.is_dir():
-            return ()
-        files = [
-            path
-            for path in self.sessions_dir.iterdir()
-            if path.is_file() and path.suffix == EVENT_FILE_SUFFIX
-        ]
-        files.sort(key=lambda p: p.name)
-        return tuple(path.stem for path in files)
+        with self.lock:
+            if not self.sessions_dir.is_dir():
+                return ()
+            files = [
+                path
+                for path in self.sessions_dir.iterdir()
+                if path.is_file() and path.suffix == EVENT_FILE_SUFFIX
+            ]
+            files.sort(key=lambda p: p.name)
+            return tuple(path.stem for path in files)
 
     def load_all(self) -> tuple[StrikeEvent | Event, ...]:
         """전 세션 이벤트를 세션 기록 순서로 이어 붙인 누적 스트림."""
-        events: list[StrikeEvent | Event] = []
-        for session_id in self.session_ids():
-            events.extend(self.load_session(session_id))
-        # 이벤트의 논리적 기록 시각이 파일 mtime보다 우선한다.
-        events.sort(key=lambda event: event.at)
-        return tuple(events)
+        with self.lock:
+            events: list[StrikeEvent | Event] = []
+            for session_id in self.session_ids():
+                events.extend(self.load_session(session_id))
+            # 이벤트의 논리적 기록 시각이 파일 mtime보다 우선한다.
+            events.sort(key=lambda event: event.at)
+            return tuple(events)
+
+    def load_completed(self) -> tuple[StrikeEvent | Event, ...]:
+        """완료 이벤트가 없는 진행 중 세션을 제외한 안정된 누적 스트림."""
+        with self.lock:
+            events = self.load_all()
+            started = {
+                event.session_id
+                for event in events
+                if isinstance(event, Event) and event.type is EventType.SESSION_START
+            }
+            completed = {
+                event.session_id
+                for event in events
+                if isinstance(event, Event)
+                and event.type
+                in (EventType.SESSION_VALIDATED, EventType.SESSION_VOIDED)
+            }
+            return tuple(
+                event
+                for event in events
+                if event.session_id not in started or event.session_id in completed
+            )

@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
@@ -44,6 +45,7 @@ from popper.conflict import (
 )
 from popper.events import Event, EventType
 from popper.judgment import acknowledge, emit_condition_met, fold_judgment
+from popper.locking import base_lock
 from popper.recheck import (
     DEFAULT_BUDGET,
     MANUAL_COMMAND,
@@ -67,14 +69,15 @@ JUDGMENT_SESSION_ID = "judgment-ledger"
 
 
 def _load_manifest(base_dir: Path) -> dict[str, Any] | None:
-    path = base_dir / MANIFEST_JSON
-    if not path.exists():
-        return None
-    try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        logger.exception("manifest를 읽지 못했다: %s", path)
-        return None
+    with base_lock(base_dir):
+        path = base_dir / MANIFEST_JSON
+        if not path.exists():
+            return None
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            logger.exception("manifest를 읽지 못했다: %s", path)
+            return None
     return document if isinstance(document, dict) else None
 
 
@@ -89,15 +92,16 @@ def _banner_text(manifest: Mapping[str, Any] | None) -> str | None:
 
 
 def _load_consent(base_dir: Path) -> ConsentLedger:
-    path = base_dir / CONSENT_FILE
-    ledger = ConsentLedger()
-    if not path.exists():
-        return ledger
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except (OSError, UnicodeError):
-        logger.exception("동의 원장을 읽지 못했다: %s", path)
-        return ledger
+    with base_lock(base_dir):
+        path = base_dir / CONSENT_FILE
+        ledger = ConsentLedger()
+        if not path.exists():
+            return ledger
+        try:
+            lines = path.read_text(encoding="utf-8").splitlines()
+        except (OSError, UnicodeError):
+            logger.exception("동의 원장을 읽지 못했다: %s", path)
+            return ledger
     for number, line in enumerate(lines, start=1):
         if not line.strip():
             continue
@@ -118,21 +122,27 @@ def _load_consent(base_dir: Path) -> ConsentLedger:
 
 
 def _persist_consent(base_dir: Path, record: ConsentRecord) -> None:
-    path = base_dir / CONSENT_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(record.to_dict(), ensure_ascii=False, sort_keys=True) + "\n")
+    with base_lock(base_dir):
+        path = base_dir / CONSENT_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(
+                json.dumps(record.to_dict(), ensure_ascii=False, sort_keys=True) + "\n"
+            )
+            f.flush()
+            os.fsync(f.fileno())
 
 
 def _load_manual_rules(base_dir: Path) -> tuple[ManualRule, ...]:
-    path = base_dir / MANUAL_RULES_FILE
-    if not path.exists():
-        return ()
-    try:
-        document = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        logger.exception("수기 룰 파일을 읽지 못했다: %s", path)
-        return ()
+    with base_lock(base_dir):
+        path = base_dir / MANUAL_RULES_FILE
+        if not path.exists():
+            return ()
+        try:
+            document = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            logger.exception("수기 룰 파일을 읽지 못했다: %s", path)
+            return ()
     rules: list[ManualRule] = []
     for entry in document.get("rules", ()):
         if not isinstance(entry, Mapping):
@@ -223,15 +233,16 @@ def _seal_payload() -> dict[str, Any] | None:
 
 def _ensure_seal_event(store: EventStore) -> None:
     """검증 세션 이전에 prereg_sealed 이벤트가 스트림에 정확히 하나 있게 한다."""
-    for event in store.load_all():
-        if getattr(event, "type", None) is EventType.PREREG_SEALED:
+    with store.lock:
+        for event in store.load_all():
+            if getattr(event, "type", None) is EventType.PREREG_SEALED:
+                return
+        payload = _seal_payload()
+        if payload is None:
             return
-    payload = _seal_payload()
-    if payload is None:
-        return
-    store.append(
-        Event(type=EventType.PREREG_SEALED, session_id="prereg", payload=payload)
-    )
+        store.append(
+            Event(type=EventType.PREREG_SEALED, session_id="prereg", payload=payload)
+        )
     logger.info("봉인 기준 적재: prereg_sealed (digest=%s...)", payload["digest"][:12])
 
 
@@ -314,7 +325,7 @@ def cmd_open(args: argparse.Namespace) -> int:
         profile=PROFILE_PRODUCT,
         store=store,
         land_dir=base,
-        history=store.load_all(),
+        history=store.load_completed(),
         banner=_banner_text(manifest),
         conflicts_for=_conflicts_for(base),
     )
@@ -325,11 +336,11 @@ def cmd_validate(args: argparse.Namespace) -> int:
     base = Path(args.base_dir)
     store = EventStore(base)
     _ensure_seal_event(store)
-    history = store.load_all()
+    all_events = store.load_all()
     gap_hours = _validation_gap_hours()
     if gap_hours is None:
         return 1
-    previous = _latest_validation_end(history)
+    previous = _latest_validation_end(all_events)
     now = datetime.now(timezone.utc)
     if previous is not None and (now - previous).total_seconds() < gap_hours * 3600:
         logger.error(
@@ -342,7 +353,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
         profile=PROFILE_VALIDATION,
         store=store,
         land_dir=base,
-        history=history,
+        history=store.load_completed(),
     )
     return _serve(session, args)
 
@@ -368,7 +379,7 @@ def cmd_recheck(args: argparse.Namespace) -> int:
             profile=PROFILE_RECHECK,
             store=store,
             land_dir=base,
-            history=store.load_all(),
+            history=store.load_completed(),
             recheck_manifest=manifest,
             recheck_budget=args.budget,
             conflicts_for=_conflicts_for(base),
@@ -418,25 +429,26 @@ def cmd_status(args: argparse.Namespace) -> int:
 def cmd_land(args: argparse.Namespace) -> int:
     base = Path(args.base_dir)
     store = EventStore(base)
-    events = store.load_all()
-    if not events:
-        logger.error("저장된 이벤트가 없다 - 착지할 스트림이 없다")
-        return 1
-    try:
-        manifest = _load_manifest(base) or {}
-        result = write_outputs(
-            events,
-            base_dir=base,
-            session_id=manifest.get("session_id"),
-            acknowledge_mismatch=args.acknowledge_mismatch,
-            conflicts=_conflicts_for(base)(compile_rules(events)),
-        )
-    except HashMismatch as e:
-        logger.error("착지 차단 - content hash 불일치 (silent overwrite 금지)")
-        for record in e.records:
-            logger.error("  %s (%s)", record.get("path"), record.get("reason"))
-        logger.error("의도한 재착지라면 --acknowledge-mismatch를 붙여라")
-        return 1
+    with store.lock:
+        events = store.load_completed()
+        if not events:
+            logger.error("저장된 이벤트가 없다 - 착지할 스트림이 없다")
+            return 1
+        try:
+            manifest = _load_manifest(base) or {}
+            result = write_outputs(
+                events,
+                base_dir=base,
+                session_id=manifest.get("session_id"),
+                acknowledge_mismatch=args.acknowledge_mismatch,
+                conflicts=_conflicts_for(base)(compile_rules(events)),
+            )
+        except HashMismatch as e:
+            logger.error("착지 차단 - content hash 불일치 (silent overwrite 금지)")
+            for record in e.records:
+                logger.error("  %s (%s)", record.get("path"), record.get("reason"))
+            logger.error("의도한 재착지라면 --acknowledge-mismatch를 붙여라")
+            return 1
     logger.info("착지 완료: %s", result.base_dir)
     for path in result.written:
         logger.info("  %s", path)
@@ -478,15 +490,16 @@ def cmd_optin(args: argparse.Namespace) -> int:
 def cmd_acknowledge(args: argparse.Namespace) -> int:
     base = Path(args.base_dir)
     store = EventStore(base)
-    state = fold_judgment(store.load_all())
-    if not state.condition_met:
-        logger.error("refutation_condition_met 미성립 - 인간 확정은 조건 성립 후에만 가능하다")
-        return 1
-    condition = emit_condition_met(state, JUDGMENT_SESSION_ID)
-    if condition is not None and not state.supported_condition_events:
-        store.append(condition)
-        logger.info("기계 방출 기록: refutation_condition_met")
-    store.append(acknowledge(JUDGMENT_SESSION_ID, args.actor))
+    with store.lock:
+        state = fold_judgment(store.load_all())
+        if not state.condition_met:
+            logger.error("refutation_condition_met 미성립 - 인간 확정은 조건 성립 후에만 가능하다")
+            return 1
+        condition = emit_condition_met(state, JUDGMENT_SESSION_ID)
+        if condition is not None and not state.supported_condition_events:
+            store.append(condition)
+            logger.info("기계 방출 기록: refutation_condition_met")
+        store.append(acknowledge(JUDGMENT_SESSION_ID, args.actor))
     logger.info("인간 확정 기록: refutation_acknowledged (actor=%s)", args.actor)
     logger.info("핵심 반증 확정 - 긋기-only 접근을 직접편집 전환으로 피벗한다")
     return 0
