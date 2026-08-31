@@ -580,19 +580,7 @@ def cmd_status(args: argparse.Namespace) -> int:
     base = Path(args.base_dir)
     manifest = _load_manifest(base)
     activation = _activation_state(base)
-    if manifest is None:
-        logger.info("착지된 산출물이 없다 - popper open으로 첫 세션을 완주해라")
-    else:
-        logger.info("착지 디렉토리: %s", base)
-        logger.info("마지막 착지: %s", manifest.get("generated_at"))
-        logger.info("마지막 재심: %s", manifest.get("last_review"))
-        logger.info("남은 가설 조합: %s", manifest.get("remaining_combinations"))
-        queue = manifest.get("recheck_queue") or ()
-        logger.info("재심 대기: %d건", len(queue))
-        banner = _banner_text(manifest)
-        if banner:
-            logger.info("배너: %s", banner)
-
+    banner = _banner_text(manifest)
     store = EventStore(base)
     events = store.load_all()
     summaries = summarize_sessions(events)
@@ -605,6 +593,7 @@ def cmd_status(args: argparse.Namespace) -> int:
                     "version": app_version(),
                     "base_dir": str(base.expanduser().resolve()),
                     "manifest": manifest,
+                    "banner": banner,
                     "activation": activation,
                     "sessions": [summary.to_dict() for summary in summaries],
                     "judgment": {
@@ -622,6 +611,17 @@ def cmd_status(args: argparse.Namespace) -> int:
             )
         )
         return 0
+    if manifest is None:
+        logger.info("착지된 산출물이 없다 - popper open으로 첫 세션을 완주해라")
+    else:
+        logger.info("착지 디렉토리: %s", base)
+        logger.info("마지막 착지: %s", manifest.get("generated_at"))
+        logger.info("마지막 재심: %s", manifest.get("last_review"))
+        logger.info("남은 가설 조합: %s", manifest.get("remaining_combinations"))
+        queue = manifest.get("recheck_queue") or ()
+        logger.info("재심 대기: %d건", len(queue))
+        if banner:
+            logger.info("배너: %s", banner)
     logger.info("활성화: %s", activation["status"])
     if activation["remediation"]:
         logger.info("활성화 다음 행동: %s", activation["remediation"])

@@ -141,6 +141,12 @@ def test_cli_json_surfaces_are_machine_readable(tmp_path: Path, capsys) -> None:
     sessions = json.loads(capsys.readouterr().out)
     assert sessions == {"artifact": "popper_sessions", "sessions": []}
 
+    assert main(["status", "--base-dir", str(tmp_path), "--json"]) == 0
+    captured = capsys.readouterr()
+    status = json.loads(captured.out)
+    assert status["artifact"] == "popper_status"
+    assert captured.err == ""
+
 
 def test_backup_manifest_is_not_listed_as_payload(tmp_path: Path) -> None:
     archive = tmp_path / "empty.zip"
