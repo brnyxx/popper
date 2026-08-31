@@ -4,5 +4,6 @@ __pycache__/
 *.pyc
 *.egg-info/
 build/
+dist/
 .gjc/
 .ouroboros_eval_artifact.md

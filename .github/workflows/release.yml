@@ -39,7 +39,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: python -m pip install --upgrade build
+      - run: python -m pip install ".[release]"
       - run: npm install --global @anthropic-ai/claude-code
       - name: Validate tag and plugin manifests
         run: |
@@ -48,6 +48,7 @@ jobs:
           echo "VERSION=${VERSION}" >> "${GITHUB_ENV}"
           claude plugin validate .
       - run: python -m build
+      - run: python -m twine check dist/*.whl dist/*.tar.gz
       - run: python scripts/build_plugin_archive.py "dist/popper-plugin-${VERSION}.zip"
       - name: Create checksums
         working-directory: dist
