@@ -7,14 +7,17 @@ Popper는 자기 소유 디렉토리(~/.claude/popper/) 밖에 절대 쓰지 않
 디스크 내용이 불일치하면(수기 편집) silent overwrite 대신 감지 신호
 (최강 strike 신호)를 반환하고 쓰기를 전면 중단한다.
 
-@import 한 줄 제거가 전체 롤백 지점이다 - 사용자 파일에는 그 한 줄 외
-어떤 바이트도 추가/변경하지 않는다.
+성공적으로 추가한 @import의 위치와 prefix hash는 activation receipt에 먼저
+기록한다. 롤백은 receipt가 증명한 occurrence 하나만 제거하며, 기존 사용자
+import나 prefix drift는 건드리지 않는다.
 """
 
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,6 +55,11 @@ IMPORT_NO_PERMISSION = "permission_missing"
 IMPORT_INVALID_PERMISSION = "invalid_permission"
 IMPORT_SUBJECT_MISMATCH = "permission_subject_mismatch"
 IMPORT_TARGET_MISSING = "claude_md_missing"
+IMPORT_NOT_OWNED = "not_owned"
+IMPORT_OWNERSHIP_DRIFT = "ownership_drift"
+
+ACTIVATION_RECEIPT = "activation.json"
+ACTIVATION_SCHEMA_VERSION = 1
 
 
 class OwnershipViolation(RuntimeError):
@@ -128,7 +136,9 @@ class OwnedWriter:
         live_settings_path: Path | None = None,
     ) -> None:
         home_claude = Path.home() / ".claude"
-        self.base_dir = (base_dir if base_dir is not None else default_base_dir()).resolve()
+        self.base_dir = (
+            base_dir if base_dir is not None else default_base_dir()
+        ).resolve()
         self.claude_md_path = (
             claude_md_path if claude_md_path is not None else home_claude / "CLAUDE.md"
         ).resolve()
@@ -266,6 +276,45 @@ class OwnedWriter:
         with base_lock(self.base_dir):
             return self._write_outputs_unlocked(documents, now=now)
 
+    @property
+    def activation_receipt_path(self) -> Path:
+        return self.base_dir / ACTIVATION_RECEIPT
+
+    def _write_activation_receipt_unlocked(self, receipt: Mapping[str, Any]) -> None:
+        atomic_write_text(self.activation_receipt_path, _canonical(receipt))
+
+    def _load_activation_receipt_unlocked(
+        self,
+    ) -> tuple[dict[str, Any] | None, str | None]:
+        path = self.activation_receipt_path
+        if not path.exists():
+            return None, None
+        try:
+            decoded = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            logger.warning("activation receipt를 읽지 못했다: %s", path)
+            return None, IMPORT_OWNERSHIP_DRIFT
+        if not isinstance(decoded, dict):
+            return None, IMPORT_OWNERSHIP_DRIFT
+        return decoded, None
+
+    def _clear_activation_receipt_unlocked(self) -> None:
+        path = self.activation_receipt_path
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return
+        if os.name != "nt":
+            descriptor = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+
+    @staticmethod
+    def _prefix_hash(data: bytes) -> str:
+        return hashlib.sha256(data).hexdigest()
+
     def _ensure_import_unlocked(
         self, permission: ConsentRecord | None = None
     ) -> ImportOutcome:
@@ -276,69 +325,174 @@ class OwnedWriter:
         """
         line = self.import_line()
         target = self.claude_md_path
-        if not target.exists():
-            return ImportOutcome(
-                path=target, line=line, changed=False, reason=IMPORT_TARGET_MISSING
-            )
-
-        data = target.read_bytes()
         encoded = line.encode("utf-8")
+
+        def permission_error() -> str | None:
+            if permission is None:
+                return IMPORT_NO_PERMISSION
+            if (
+                not isinstance(permission, ConsentRecord)
+                or permission.kind is not ConsentKind.IMPORT_PERMISSION_GRANTED
+            ):
+                logger.warning("import 허가가 아닌 레코드 거부: %r", permission)
+                return IMPORT_INVALID_PERMISSION
+            subject = Path(permission.subject).expanduser().resolve()
+            if subject != target:
+                logger.warning(
+                    "import 허가 대상 불일치: 허가=%s, 대상=%s", subject, target
+                )
+                return IMPORT_SUBJECT_MISMATCH
+            return None
+
+        existed = target.exists()
+        data = target.read_bytes() if existed else b""
         if encoded in data.split(b"\n"):
             return ImportOutcome(
                 path=target, line=line, changed=False, reason=IMPORT_ALREADY_PRESENT
             )
-        if permission is None:
+        reason = permission_error()
+        if reason is not None:
             return ImportOutcome(
-                path=target, line=line, changed=False, reason=IMPORT_NO_PERMISSION
-            )
-        if (
-            not isinstance(permission, ConsentRecord)
-            or permission.kind is not ConsentKind.IMPORT_PERMISSION_GRANTED
-        ):
-            logger.warning("import 허가가 아닌 레코드 거부: %r", permission)
-            return ImportOutcome(
-                path=target, line=line, changed=False, reason=IMPORT_INVALID_PERMISSION
-            )
-        subject = Path(permission.subject).expanduser().resolve()
-        if subject != target:
-            logger.warning(
-                "import 허가 대상 불일치: 허가=%s, 대상=%s", subject, target
-            )
-            return ImportOutcome(
-                path=target, line=line, changed=False, reason=IMPORT_SUBJECT_MISMATCH
+                path=target,
+                line=line,
+                changed=False,
+                reason=(
+                    IMPORT_TARGET_MISSING
+                    if not existed and reason == IMPORT_NO_PERMISSION
+                    else reason
+                ),
             )
 
         separator = b"" if (not data or data.endswith(b"\n")) else b"\n"
+        receipt = {
+            "artifact": "popper_activation_receipt",
+            "schema_version": ACTIVATION_SCHEMA_VERSION,
+            "state": "prepared",
+            "target": str(target),
+            "line": line,
+            "created_file": not existed,
+            "prefix_length": len(data),
+            "prefix_sha256": self._prefix_hash(data),
+            "leading_newline": separator == b"\n",
+        }
+        self._write_activation_receipt_unlocked(receipt)
+        if target.exists() != existed or (existed and target.read_bytes() != data):
+            self._clear_activation_receipt_unlocked()
+            return ImportOutcome(
+                path=target,
+                line=line,
+                changed=False,
+                reason=IMPORT_OWNERSHIP_DRIFT,
+            )
         atomic_write_bytes(target, data + separator + encoded + b"\n")
-        logger.info("CLAUDE.md @import 추가: %s", target)
+        receipt["state"] = "added"
+        self._write_activation_receipt_unlocked(receipt)
+        logger.info("CLAUDE.md 소유 @import 추가: %s", target)
         return ImportOutcome(path=target, line=line, changed=True, reason=IMPORT_ADDED)
 
     def ensure_import(self, permission: ConsentRecord | None = None) -> ImportOutcome:
-        """CLAUDE.md 판독과 원자 교체를 대상 파일 잠금 안에서 수행한다."""
-        with target_lock(self.claude_md_path):
-            return self._ensure_import_unlocked(permission)
+        """CLAUDE.md와 소유 receipt를 동일 잠금 순서 안에서 갱신한다."""
+        with base_lock(self.base_dir):
+            with target_lock(self.claude_md_path):
+                return self._ensure_import_unlocked(permission)
 
     def _remove_import_unlocked(self) -> ImportOutcome:
         """@import 한 줄 제거 - 전체 롤백 지점. 그 한 줄만 걷어낸다."""
         line = self.import_line()
         target = self.claude_md_path
-        if not target.exists():
+        encoded = line.encode("utf-8")
+        receipt, receipt_error = self._load_activation_receipt_unlocked()
+        if receipt_error is not None:
             return ImportOutcome(
-                path=target, line=line, changed=False, reason=IMPORT_TARGET_MISSING
+                path=target,
+                line=line,
+                changed=False,
+                reason=receipt_error,
             )
+        if not target.exists():
+            if receipt is not None:
+                self._clear_activation_receipt_unlocked()
+                reason = IMPORT_NOT_PRESENT
+            else:
+                reason = IMPORT_TARGET_MISSING
+            return ImportOutcome(path=target, line=line, changed=False, reason=reason)
 
         data = target.read_bytes()
-        encoded = line.encode("utf-8")
-        segments = data.split(b"\n")
-        if encoded not in segments:
+        if receipt is None:
             return ImportOutcome(
-                path=target, line=line, changed=False, reason=IMPORT_NOT_PRESENT
+                path=target,
+                line=line,
+                changed=False,
+                reason=(
+                    IMPORT_NOT_OWNED
+                    if encoded in data.split(b"\n")
+                    else IMPORT_NOT_PRESENT
+                ),
             )
-        atomic_write_bytes(target, b"\n".join(seg for seg in segments if seg != encoded))
+
+        prefix_length = receipt.get("prefix_length")
+        prefix_sha256 = receipt.get("prefix_sha256")
+        leading_newline = receipt.get("leading_newline")
+        valid_receipt = (
+            receipt.get("artifact") == "popper_activation_receipt"
+            and receipt.get("schema_version") == ACTIVATION_SCHEMA_VERSION
+            and receipt.get("state") in {"prepared", "added"}
+            and receipt.get("target") == str(target)
+            and receipt.get("line") == line
+            and isinstance(receipt.get("created_file"), bool)
+            and isinstance(prefix_length, int)
+            and not isinstance(prefix_length, bool)
+            and prefix_length >= 0
+            and isinstance(prefix_sha256, str)
+            and len(prefix_sha256) == 64
+            and all(character in "0123456789abcdef" for character in prefix_sha256)
+            and isinstance(leading_newline, bool)
+        )
+        if not valid_receipt:
+            return ImportOutcome(
+                path=target,
+                line=line,
+                changed=False,
+                reason=IMPORT_OWNERSHIP_DRIFT,
+            )
+        if encoded not in data.split(b"\n"):
+            self._clear_activation_receipt_unlocked()
+            return ImportOutcome(
+                path=target,
+                line=line,
+                changed=False,
+                reason=IMPORT_NOT_PRESENT,
+            )
+        if receipt.get("state") != "added":
+            return ImportOutcome(
+                path=target,
+                line=line,
+                changed=False,
+                reason=IMPORT_OWNERSHIP_DRIFT,
+            )
+
+        insertion = (b"\n" if leading_newline else b"") + encoded + b"\n"
+        end = prefix_length + len(insertion)
+        if (
+            prefix_length > len(data)
+            or self._prefix_hash(data[:prefix_length]) != prefix_sha256
+            or data[prefix_length:end] != insertion
+        ):
+            return ImportOutcome(
+                path=target,
+                line=line,
+                changed=False,
+                reason=IMPORT_OWNERSHIP_DRIFT,
+            )
+        atomic_write_bytes(target, data[:prefix_length] + data[end:])
+        self._clear_activation_receipt_unlocked()
         logger.info("CLAUDE.md @import 제거(롤백): %s", target)
-        return ImportOutcome(path=target, line=line, changed=True, reason=IMPORT_REMOVED)
+        return ImportOutcome(
+            path=target, line=line, changed=True, reason=IMPORT_REMOVED
+        )
 
     def remove_import(self) -> ImportOutcome:
-        """CLAUDE.md 롤백을 대상 파일 잠금 안에서 원자 수행한다."""
-        with target_lock(self.claude_md_path):
-            return self._remove_import_unlocked()
+        """소유 receipt가 증명한 한 occurrence만 제거한다."""
+        with base_lock(self.base_dir):
+            with target_lock(self.claude_md_path):
+                return self._remove_import_unlocked()

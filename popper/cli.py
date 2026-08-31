@@ -113,7 +113,7 @@ def _activation_state(base_dir: Path) -> dict[str, str | None]:
             "path": str(target),
             "expected_import": expected,
             "remediation": (
-                f"{target}를 만든 뒤 popper enable --grant를 실행해라"
+                "popper enable --grant를 실행해라"
                 if output_exists
                 else "popper open으로 세션을 먼저 완주해라"
             ),
@@ -183,7 +183,9 @@ def _load_consent(base_dir: Path) -> ConsentLedger:
                 fields["at"] = str(record["at"])
             ledger.append(ConsentRecord(**fields))
         except (json.JSONDecodeError, ValueError, ConsentViolation, TypeError) as exc:
-            logger.warning("동의 원장 손상 - %s:%d (%s), 해당 줄을 무시한다", path, number, exc)
+            logger.warning(
+                "동의 원장 손상 - %s:%d (%s), 해당 줄을 무시한다", path, number, exc
+            )
     return ledger
 
 
@@ -345,10 +347,9 @@ def _latest_validation_end(
     }
     ended: list[datetime] = []
     for event in events:
-        if (
-            not isinstance(event, Event)
-            or event.type
-            not in (EventType.SESSION_VALIDATED, EventType.SESSION_VOIDED)
+        if not isinstance(event, Event) or event.type not in (
+            EventType.SESSION_VALIDATED,
+            EventType.SESSION_VOIDED,
         ):
             continue
         if (
@@ -395,9 +396,7 @@ def _serve(session: ColdOpenSession, args: argparse.Namespace) -> int:
         return 0
     server = build_server(session=session, host=args.host, port=args.port)
     logger.info("긋기 화면: %s", server.url)
-    logger.info(
-        "세션: %s (%s) - 중단은 Ctrl+C", session.session_id, session.profile
-    )
+    logger.info("세션: %s (%s) - 중단은 Ctrl+C", session.session_id, session.profile)
     if not args.no_browser:
         webbrowser.open(server.url)
     try:
@@ -492,9 +491,17 @@ def cmd_resume(args: argparse.Namespace) -> int:
         and (args.session_id is None or summary.session_id == args.session_id)
     ]
     if args.session_id is None and len(resumable) > 1:
-        logger.error("재개 가능한 세션이 %d건 있다 - session-id를 지정해라", len(resumable))
+        logger.error(
+            "재개 가능한 세션이 %d건 있다 - session-id를 지정해라", len(resumable)
+        )
         for summary in resumable:
-            logger.error("  %s  %s  %d/%d", summary.session_id, summary.profile, summary.slots_used, summary.slots_total)
+            logger.error(
+                "  %s  %s  %d/%d",
+                summary.session_id,
+                summary.profile,
+                summary.slots_used,
+                summary.slots_total,
+            )
         return 1
     candidate = resumable[0] if resumable else None
     if candidate is None:
@@ -551,11 +558,7 @@ def cmd_recheck(args: argparse.Namespace) -> int:
         logger.error("착지된 manifest가 없다 - 일반 세션(popper open)을 먼저 완주해라")
         return 1
     queue = manifest.get("recheck_queue")
-    if (
-        not isinstance(queue, Sequence)
-        or isinstance(queue, (str, bytes))
-        or not queue
-    ):
+    if not isinstance(queue, Sequence) or isinstance(queue, (str, bytes)) or not queue:
         logger.info("재심 대기 0건 - 열 재심 세션이 없다")
         return 0
     store = EventStore(base)
@@ -679,7 +682,9 @@ def cmd_enable(args: argparse.Namespace) -> int:
     writer = OwnedWriter(base_dir=base)
     if not args.grant:
         logger.info("추가될 한 줄: %s", writer.import_line())
-        logger.info("사용자 파일은 허가 없이는 건드리지 않는다 - --grant로 허가를 명시해라")
+        logger.info(
+            "사용자 파일은 허가 없이는 건드리지 않는다 - --grant로 허가를 명시해라"
+        )
         return 1
     record = ConsentRecord(
         kind=ConsentKind.IMPORT_PERMISSION_GRANTED,
@@ -695,7 +700,7 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     writer = OwnedWriter(base_dir=Path(args.base_dir))
     outcome = writer.remove_import()
     logger.info("결과: %s (%s)", outcome.reason, outcome.path)
-    return 0 if outcome.reason in ("removed", "not_present") else 1
+    return 0 if outcome.reason in ("removed", "not_present", "not_owned") else 1
 
 
 def cmd_optin(args: argparse.Namespace) -> int:
@@ -712,7 +717,9 @@ def cmd_acknowledge(args: argparse.Namespace) -> int:
     with store.lock:
         state = fold_judgment(store.load_all())
         if not state.condition_met:
-            logger.error("refutation_condition_met 미성립 - 인간 확정은 조건 성립 후에만 가능하다")
+            logger.error(
+                "refutation_condition_met 미성립 - 인간 확정은 조건 성립 후에만 가능하다"
+            )
             return 1
         condition = emit_condition_met(state, JUDGMENT_SESSION_ID)
         if condition is not None and not state.supported_condition_events:
@@ -753,7 +760,7 @@ def cmd_sessions(args: argparse.Namespace) -> int:
                 summary.slots_total,
                 summary.updated_at,
             )
-            for event in (events[-args.events :] if args.events else ()):
+            for event in events[-args.events :] if args.events else ():
                 logger.info(
                     "  %s  %s  %s",
                     event.at,
@@ -799,7 +806,9 @@ def cmd_sessions(args: argparse.Namespace) -> int:
 def cmd_doctor(args: argparse.Namespace) -> int:
     report = run_doctor(args.base_dir)
     if args.json_output:
-        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+        print(
+            json.dumps(report.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
+        )
     else:
         logger.info("Popper %s doctor - %s", report.version, report.base_dir)
         for check in report.checks:
@@ -844,7 +853,9 @@ def cmd_data_backup(args: argparse.Namespace) -> int:
 def cmd_data_inspect(args: argparse.Namespace) -> int:
     report = inspect_backup(args.path)
     if args.json_output:
-        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+        print(
+            json.dumps(report.to_dict(), ensure_ascii=False, indent=2, sort_keys=True)
+        )
     else:
         logger.info("백업: %s", report.path)
         logger.info(
@@ -888,7 +899,9 @@ def _add_common(parser: argparse.ArgumentParser) -> None:
 def _add_serve_common(parser: argparse.ArgumentParser) -> None:
     _add_common(parser)
     parser.add_argument("--host", default=HOST, help="바인딩할 주소")
-    parser.add_argument("--port", type=int, default=EPHEMERAL_PORT, help="바인딩할 포트")
+    parser.add_argument(
+        "--port", type=int, default=EPHEMERAL_PORT, help="바인딩할 포트"
+    )
     parser.add_argument(
         "--repo",
         type=Path,
@@ -943,7 +956,9 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p_sessions)
     p_sessions.add_argument("session_id", nargs="?", help="상세 조회할 session_id")
     p_sessions.add_argument("--limit", type=int, default=10, help="목록 최대 건수")
-    p_sessions.add_argument("--events", type=int, default=10, help="상세 최근 이벤트 건수")
+    p_sessions.add_argument(
+        "--events", type=int, default=10, help="상세 최근 이벤트 건수"
+    )
     p_sessions.add_argument("--json", dest="json_output", action="store_true")
     p_sessions.set_defaults(func=cmd_sessions)
 
@@ -952,7 +967,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_doctor.add_argument("--json", dest="json_output", action="store_true")
     p_doctor.set_defaults(func=cmd_doctor)
 
-    p_export = sub.add_parser("export", help="수렴 규칙을 에이전트 중립 형식으로 내보냄")
+    p_export = sub.add_parser(
+        "export", help="수렴 규칙을 에이전트 중립 형식으로 내보냄"
+    )
     _add_common(p_export)
     p_export.add_argument("--format", choices=EXPORT_FORMATS, default="markdown")
     p_export.add_argument("--output", type=Path, help="생략하면 stdout")

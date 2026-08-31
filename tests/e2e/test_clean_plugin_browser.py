@@ -6,7 +6,7 @@ import json
 import os
 import shutil
 import subprocess
-import sys
+import venv
 from pathlib import Path
 
 import pytest
@@ -70,10 +70,30 @@ def test_clean_plugin_browser(page, tmp_path: Path) -> None:
     (project / "index.ts").write_text("export const ready = true;\n", encoding="utf-8")
     launcher = candidates[0] / "scripts" / "popper_plugin.py"
     assert launcher.is_file()
+    runtime_venv = tmp_path / "runtime-venv"
+    venv.EnvBuilder(with_pip=False).create(runtime_venv)
+    runtime_python = runtime_venv / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    runtime_env = dict(env)
+    runtime_env.pop("PYTHONPATH", None)
+    runtime_env.pop("PYTHONHOME", None)
+    probe = subprocess.run(
+        [
+            str(runtime_python),
+            "-I",
+            "-c",
+            "import importlib.util; raise SystemExit(importlib.util.find_spec('popper') is not None)",
+        ],
+        cwd=tmp_path,
+        env=runtime_env,
+        check=False,
+    )
+    assert probe.returncode == 0
     landed = tmp_path / "landed"
     doctor = subprocess.run(
         [
-            sys.executable,
+            str(runtime_python),
             str(launcher),
             "doctor",
             "--base-dir",
@@ -81,7 +101,7 @@ def test_clean_plugin_browser(page, tmp_path: Path) -> None:
             "--json",
         ],
         cwd=project,
-        env=env,
+        env=runtime_env,
         check=True,
         capture_output=True,
         text=True,
@@ -91,8 +111,8 @@ def test_clean_plugin_browser(page, tmp_path: Path) -> None:
     first, url = _start_server(
         landed,
         cwd=project,
-        env=env,
-        command=[sys.executable, str(launcher)],
+        env=runtime_env,
+        command=[str(runtime_python), str(launcher)],
         extra_args=["--repo", str(project)],
     )
     second: subprocess.Popen[str] | None = None
@@ -107,8 +127,8 @@ def test_clean_plugin_browser(page, tmp_path: Path) -> None:
         second, resumed_url = _start_server(
             landed,
             cwd=project,
-            env=env,
-            command=[sys.executable, str(launcher)],
+            env=runtime_env,
+            command=[str(runtime_python), str(launcher)],
             extra_args=["--repo", str(project)],
             operation="resume",
         )
@@ -126,6 +146,131 @@ def test_clean_plugin_browser(page, tmp_path: Path) -> None:
         )
         assert "산출물이 착지했다" in page.locator("#landing").inner_text()
         assert second.wait(timeout=5) == 0
+
+        claude_md = home / ".claude" / "CLAUDE.md"
+        without_grant = subprocess.run(
+            [
+                str(runtime_python),
+                str(launcher),
+                "enable",
+                "--base-dir",
+                str(landed),
+            ],
+            cwd=project,
+            env=runtime_env,
+            check=False,
+        )
+        assert without_grant.returncode == 1
+        assert not claude_md.exists()
+
+        subprocess.run(
+            [
+                str(runtime_python),
+                str(launcher),
+                "enable",
+                "--grant",
+                "--base-dir",
+                str(landed),
+            ],
+            cwd=project,
+            env=runtime_env,
+            check=True,
+        )
+        enabled = subprocess.run(
+            [
+                str(runtime_python),
+                str(launcher),
+                "status",
+                "--base-dir",
+                str(landed),
+                "--json",
+            ],
+            cwd=project,
+            env=runtime_env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        enabled_status = json.loads(enabled.stdout)
+        assert enabled_status["activation"]["status"] == "active"
+        expected_import = enabled_status["activation"]["expected_import"]
+        expected_bytes = (expected_import + "\n").encode("utf-8")
+        assert claude_md.read_bytes() == expected_bytes
+        assert (landed / "activation.json").is_file()
+        subprocess.run(
+            [
+                str(runtime_python),
+                str(launcher),
+                "enable",
+                "--grant",
+                "--base-dir",
+                str(landed),
+            ],
+            cwd=project,
+            env=runtime_env,
+            check=True,
+        )
+        assert claude_md.read_bytes() == expected_bytes
+
+        subprocess.run(
+            [
+                str(runtime_python),
+                str(launcher),
+                "rollback",
+                "--base-dir",
+                str(landed),
+            ],
+            cwd=project,
+            env=runtime_env,
+            check=True,
+        )
+        rolled_back = subprocess.run(
+            [
+                str(runtime_python),
+                str(launcher),
+                "status",
+                "--base-dir",
+                str(landed),
+                "--json",
+            ],
+            cwd=project,
+            env=runtime_env,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        assert json.loads(rolled_back.stdout)["activation"]["status"] == "inactive"
+        assert claude_md.read_bytes() == b""
+        assert not (landed / "activation.json").exists()
+
+        claude_md.write_bytes(expected_bytes)
+        subprocess.run(
+            [
+                str(runtime_python),
+                str(launcher),
+                "enable",
+                "--grant",
+                "--base-dir",
+                str(landed),
+            ],
+            cwd=project,
+            env=runtime_env,
+            check=True,
+        )
+        subprocess.run(
+            [
+                str(runtime_python),
+                str(launcher),
+                "rollback",
+                "--base-dir",
+                str(landed),
+            ],
+            cwd=project,
+            env=runtime_env,
+            check=True,
+        )
+        assert claude_md.read_bytes() == expected_bytes
+        assert not (landed / "activation.json").exists()
     finally:
         if first.poll() is None:
             first.kill()

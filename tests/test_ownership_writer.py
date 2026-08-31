@@ -16,13 +16,17 @@ import pytest
 from popper.compiler import MANIFEST_JSON, POPPER_MD, SETTINGS_JSON
 from popper.conflict import ConsentLedger
 from popper.writer import (
+    ACTIVATION_RECEIPT,
     DETECT_MANUAL_EDIT,
     IMPORT_ADDED,
     IMPORT_ALREADY_PRESENT,
     IMPORT_INVALID_PERMISSION,
     IMPORT_NO_PERMISSION,
+    IMPORT_NOT_OWNED,
+    IMPORT_OWNERSHIP_DRIFT,
     IMPORT_REMOVED,
     IMPORT_SUBJECT_MISMATCH,
+    IMPORT_TARGET_MISSING,
     MANUAL_EDIT_STRIKE,
     OwnedWriter,
     OwnershipViolation,
@@ -146,6 +150,89 @@ def test_permission_adds_exactly_one_line_and_is_idempotent(tmp_path: Path) -> N
     assert second.changed is False
     assert second.reason == IMPORT_ALREADY_PRESENT
     assert claude_md.read_bytes() == after
+
+
+def test_explicit_permission_creates_missing_claude_md_with_only_import(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / "fresh-home" / ".claude" / "CLAUDE.md"
+    writer = OwnedWriter(
+        base_dir=tmp_path / "owned" / "popper",
+        claude_md_path=target,
+    )
+    without_permission = writer.ensure_import()
+    assert without_permission.reason == IMPORT_TARGET_MISSING
+    assert not target.exists()
+
+    enabled = writer.ensure_import(grant(writer))
+    assert enabled.changed is True
+    assert enabled.reason == IMPORT_ADDED
+    assert target.read_bytes() == (enabled.line + "\n").encode("utf-8")
+    assert writer.path(ACTIVATION_RECEIPT).is_file()
+
+    rollback = writer.remove_import()
+    assert rollback.changed is True
+    assert target.read_bytes() == b""
+    assert not writer.path(ACTIVATION_RECEIPT).exists()
+
+
+def test_preexisting_matching_import_is_never_claimed_or_removed(
+    tmp_path: Path,
+) -> None:
+    writer = make_writer(tmp_path)
+    line = writer.import_line()
+    writer.claude_md_path.write_text(line + "\n", encoding="utf-8")
+    before = writer.claude_md_path.read_bytes()
+
+    enabled = writer.ensure_import(grant(writer))
+    assert enabled.reason == IMPORT_ALREADY_PRESENT
+    assert not writer.path(ACTIVATION_RECEIPT).exists()
+    rollback = writer.remove_import()
+    assert rollback.reason == IMPORT_NOT_OWNED
+    assert rollback.changed is False
+    assert writer.claude_md_path.read_bytes() == before
+
+
+def test_rollback_removes_owned_occurrence_and_preserves_later_duplicate(
+    tmp_path: Path,
+) -> None:
+    writer = make_writer(tmp_path)
+    enabled = writer.ensure_import(grant(writer))
+    duplicate = (enabled.line + "\n").encode("utf-8")
+    with writer.claude_md_path.open("ab") as stream:
+        stream.write(duplicate)
+
+    rollback = writer.remove_import()
+    assert rollback.reason == IMPORT_REMOVED
+    assert (
+        writer.claude_md_path.read_bytes() == CLAUDE_MD_BODY.encode("utf-8") + duplicate
+    )
+
+
+def test_rollback_fails_closed_when_prefix_ownership_has_drifted(
+    tmp_path: Path,
+) -> None:
+    writer = make_writer(tmp_path)
+    enabled = writer.ensure_import(grant(writer))
+    data = writer.claude_md_path.read_bytes()
+    writer.claude_md_path.write_bytes(b"!" + data[1:])
+
+    rollback = writer.remove_import()
+    assert rollback.reason == IMPORT_OWNERSHIP_DRIFT
+    assert rollback.changed is False
+    assert enabled.line.encode("utf-8") in writer.claude_md_path.read_bytes()
+
+
+def test_prepared_receipt_never_claims_a_matching_line(tmp_path: Path) -> None:
+    writer = make_writer(tmp_path)
+    enabled = writer.ensure_import(grant(writer))
+    receipt = json.loads(writer.path(ACTIVATION_RECEIPT).read_text(encoding="utf-8"))
+    receipt["state"] = "prepared"
+    writer.path(ACTIVATION_RECEIPT).write_text(json.dumps(receipt), encoding="utf-8")
+
+    rollback = writer.remove_import()
+    assert rollback.reason == IMPORT_OWNERSHIP_DRIFT
+    assert enabled.line.encode("utf-8") in writer.claude_md_path.read_bytes()
 
 
 def test_removing_import_line_restores_original_bytes(tmp_path: Path) -> None:
