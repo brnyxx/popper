@@ -27,9 +27,16 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from popper.counter import DEFAULT_CATALOG, INITIAL_COMBINATIONS
-from popper.web.page import TEMPLATE_PATH
+from popper.web.page import TEMPLATE_PATH, render_page
 from popper.web.server import build_server
-from popper.web.state import COLD_OPEN_AXIS, STRIKE_TARGETS, ColdOpenSession
+from popper.web.state import (
+    COLD_OPEN_AXIS,
+    STRIKE_TARGETS,
+    ColdOpenSession,
+    PairView,
+    RuleView,
+    Snapshot,
+)
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WEB_DIR = REPO_ROOT / "popper" / "web"
@@ -69,11 +76,13 @@ ALLOWED_IMPORT_ROOTS = frozenset(
         "argparse",
         "dataclasses",
         "functools",
+        "hashlib",
         "html",
         "http",
         "json",
         "logging",
         "pathlib",
+        "re",
         "threading",
         "typing",
         "uuid",
@@ -119,6 +128,11 @@ class Affordance:
     @property
     def strike_target(self) -> str | None:
         return self.attrs.get("data-strike-target")
+
+    @property
+    def recovery_channel(self) -> str | None:
+        """AC3의 명시 복구 채널 표식 - 긍정 입력이 아니라 오긋기 복구다."""
+        return self.attrs.get("data-recovery-channel")
 
 
 class AffordanceScan(HTMLParser):
@@ -329,18 +343,34 @@ class StrikeOnlyAffordanceTest(ServerCase):
         _, self.html = self.get(server, "/")
         self.scan = scan_page(self.html)
 
-    def test_every_affordance_is_a_strike(self) -> None:
+    def test_every_affordance_is_a_strike_or_the_undo_channel(self) -> None:
+        """어포던스는 긋기 아니면 AC3의 undo_tombstone 명시 복구 채널뿐이다."""
         self.assertFalse(self.scan.nested_affordance, "어포던스가 중첩됐다")
         self.assertTrue(self.scan.affordances, "어포던스를 하나도 찾지 못했다")
         for affordance in self.scan.affordances:
             with self.subTest(tag=affordance.tag, label=affordance.label):
-                self.assertIsNotNone(
-                    affordance.strike_target,
-                    f"긋기가 아닌 어포던스가 있다: <{affordance.tag}> {affordance.label!r}",
+                self.assertTrue(
+                    affordance.strike_target is not None
+                    or affordance.recovery_channel == "undo_tombstone",
+                    f"긋기도 복구 채널도 아닌 어포던스가 있다: "
+                    f"<{affordance.tag}> {affordance.label!r}",
                 )
 
+    def test_recovery_channel_is_single_and_explicit(self) -> None:
+        """복구 채널 어포던스는 undo_tombstone 하나뿐이고 긋기와 겹치지 않는다."""
+        channels = [
+            a for a in self.scan.affordances if a.recovery_channel is not None
+        ]
+        self.assertEqual(len(channels), 1)
+        self.assertEqual(channels[0].recovery_channel, "undo_tombstone")
+        self.assertIsNone(channels[0].strike_target)
+
     def test_strike_targets_are_exactly_the_four(self) -> None:
-        targets = [a.strike_target for a in self.scan.affordances]
+        targets = [
+            a.strike_target
+            for a in self.scan.affordances
+            if a.strike_target is not None
+        ]
         self.assertEqual(sorted(targets), sorted(STRIKE_TARGETS))
         self.assertEqual(len(targets), len(set(targets)))
 
@@ -540,6 +570,49 @@ class OfflineRuntimeTest(unittest.TestCase):
             assets,
             ["__init__.py", "__main__.py", "index.html", "page.py", "server.py", "state.py"],
         )
+
+
+class RenderingHardeningTest(unittest.TestCase):
+    """사용자 텍스트가 템플릿/스크립트 경계를 넘지 않는지 고정한다."""
+
+    def test_token_like_and_script_text_are_not_reinterpreted(self) -> None:
+        text = '</script><script>alert("x")</script>{{RIGHT_TEXT}}'
+        pair = PairView(
+            pair_id="p",
+            scene_id="s",
+            axis="a",
+            axis_label="{{LEFT_TEXT}}",
+            left_value="l",
+            right_value="r",
+            left_text=text,
+            right_text="{{LEFT_TEXT}}",
+        )
+        snapshot = Snapshot(
+            session_id="session",
+            profile="product",
+            pair=pair,
+            remaining_combinations=1,
+            eliminated_pairs=0,
+            strike_count=0,
+            slots_used=0,
+            slots_total=3,
+            rules=(RuleView("a", "axis", "v", text),),
+        )
+        rendered = render_page(snapshot)
+        payload = boot_payload(rendered)
+        self.assertEqual(payload["pair"]["left_text"], text)
+        self.assertEqual(payload["pair"]["right_text"], "{{LEFT_TEXT}}")
+        self.assertNotIn("</script><script>", rendered)
+        self.assertIn("&lt;/script&gt;&lt;script&gt;", rendered)
+
+    def test_progress_and_feedback_accessibility_contract(self) -> None:
+        template = TEMPLATE_PATH.read_text(encoding="utf-8")
+        self.assertIn('role="progressbar"', template)
+        self.assertIn('aria-valuemin="0"', template)
+        self.assertIn('aria-valuemax="{{SLOTS_TOTAL}}"', template)
+        self.assertIn('role="status"', template)
+        self.assertIn('aria-live="polite"', template)
+        self.assertIn("clearStriking();", template)
 
 
 if __name__ == "__main__":
