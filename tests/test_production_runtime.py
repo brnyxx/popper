@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import http.client
 import tempfile
 import threading
 import unittest
@@ -548,6 +549,32 @@ class ServerEndpointTest(unittest.TestCase):
         thread.join(REQUEST_TIMEOUT_SECONDS)
         self.assertFalse(thread.is_alive())
         self.assertTrue(server.shutdown_requested.is_set())
+
+    def test_server_refuses_non_loopback_bindings(self) -> None:
+        with self.assertRaisesRegex(ValueError, "루프백"):
+            build_server(host="0.0.0.0")
+
+    def test_server_emits_browser_security_headers(self) -> None:
+        server = self.launch(ColdOpenSession(session_id="srv-headers"))
+        with urllib.request.urlopen(server.url, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            self.assertEqual(response.headers["X-Frame-Options"], "DENY")
+            self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
+            self.assertIn("frame-ancestors 'none'", response.headers["Content-Security-Policy"])
+
+    def test_server_rejects_untrusted_host_header(self) -> None:
+        server = self.launch(ColdOpenSession(session_id="srv-host"))
+        connection = http.client.HTTPConnection(
+            server.server_address[0],
+            server.server_address[1],
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        self.addCleanup(connection.close)
+        connection.putrequest("GET", "/", skip_host=True)
+        connection.putheader("Host", "attacker.example")
+        connection.endheaders()
+        response = connection.getresponse()
+        self.assertEqual(response.status, 421)
+        self.assertEqual(json.loads(response.read())["error"], "untrusted_origin")
 
 
 if __name__ == "__main__":

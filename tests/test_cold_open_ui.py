@@ -79,6 +79,7 @@ ALLOWED_IMPORT_ROOTS = frozenset(
         "hashlib",
         "html",
         "http",
+        "ipaddress",
         "json",
         "logging",
         "pathlib",

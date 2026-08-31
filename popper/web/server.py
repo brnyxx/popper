@@ -16,6 +16,7 @@ undo는 오긋기 복구의 명시 이벤트 채널이지 승인이 아니다. �
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
 from http import HTTPStatus
@@ -48,6 +49,15 @@ CONTENT_JSON = "application/json; charset=utf-8"
 
 #: 긋기 본문은 대상 이름 하나가 전부라 이보다 커질 이유가 없다.
 MAX_BODY_BYTES = 4096
+
+
+def _loopback_host(host: str) -> bool:
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 class ColdOpenServer(ThreadingHTTPServer):
@@ -97,6 +107,9 @@ class ColdOpenHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
     def do_GET(self) -> None:
+        if not self._request_origin_allowed():
+            self._send_json(HTTPStatus.MISDIRECTED_REQUEST, {"error": "untrusted_origin"})
+            return
         session = self._session()
         if self.path == PATH_INDEX:
             body = render_page(session.snapshot()).encode("utf-8")
@@ -108,6 +121,9 @@ class ColdOpenHandler(BaseHTTPRequestHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "unknown_path", "path": self.path})
 
     def do_POST(self) -> None:
+        if not self._request_origin_allowed():
+            self._send_json(HTTPStatus.MISDIRECTED_REQUEST, {"error": "untrusted_origin"})
+            return
         if self.path == PATH_STRIKE:
             self._handle_strike()
             return
@@ -198,6 +214,41 @@ class ColdOpenHandler(BaseHTTPRequestHandler):
             raise ValueError("본문 최상위는 객체여야 한다")
         return document
 
+    def _request_origin_allowed(self) -> bool:
+        """DNS rebinding과 교차 출처 POST를 루프백 origin 경계에서 거부한다."""
+        expected_port = self.server.server_address[1]
+
+        def trusted(raw: str) -> bool:
+            authority = raw.split("://", 1)[-1].split("/", 1)[0]
+            if not authority or "@" in authority:
+                return False
+            if authority.startswith("["):
+                closing = authority.find("]")
+                if closing < 0:
+                    return False
+                hostname = authority[1:closing]
+                raw_port = authority[closing + 1 :]
+                if raw_port and not raw_port.startswith(":"):
+                    return False
+                port_text = raw_port[1:]
+            else:
+                hostname, separator, port_text = authority.rpartition(":")
+                if not separator:
+                    hostname, port_text = authority, ""
+                elif ":" in hostname:
+                    return False
+            if not _loopback_host(hostname):
+                return False
+            if not port_text:
+                return True
+            return port_text.isdecimal() and int(port_text) == expected_port
+
+        host = self.headers.get("Host")
+        if host is None or not trusted(host):
+            return False
+        origin = self.headers.get("Origin")
+        return origin is None or trusted(origin)
+
     def _send_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self._send(status, CONTENT_JSON, body)
@@ -207,6 +258,17 @@ class ColdOpenHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header(
+            "Content-Security-Policy",
+            "default-src 'self'; script-src 'unsafe-inline'; "
+            "style-src 'unsafe-inline'; connect-src 'self'; "
+            "img-src 'self' data:; frame-ancestors 'none'; "
+            "base-uri 'none'; form-action 'none'",
+        )
+        self.send_header("Cross-Origin-Resource-Policy", "same-origin")
+        self.send_header("Referrer-Policy", "no-referrer")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
         self.end_headers()
         self.wfile.write(body)
 
@@ -220,6 +282,8 @@ def build_server(
     **session_kwargs: Any,
 ) -> ColdOpenServer:
     """바인딩까지 끝난 서버를 돌려준다 - 세션이 없으면 여기서 콜드 오픈한다."""
+    if not _loopback_host(host):
+        raise ValueError(f"루프백 밖 서버 바인딩은 허용되지 않는다: {host!r}")
     active = (
         session
         if session is not None
