@@ -1,6 +1,6 @@
 """AC7 - 세션 전체가 고정 픽스처 + 레포 읽기전용 슬롯 치환만으로 렌더되는지 검증한다.
 
-런타임 LLM/네트워크 호출 0회, slot span 맵을 통한 strike -> 축 귀속을 확인한다.
+런타임 LLM/외부 네트워크 호출 0회, slot span 맵을 통한 strike -> 축 귀속을 확인한다.
 """
 
 from __future__ import annotations
@@ -90,8 +90,12 @@ class TestRenderDeterminism:
 
     def test_global_axis_render_is_deterministic(self) -> None:
         pack = _pack()
-        first = fx.render_pair(pack, "verbosity", "terse", "explanatory", fx.GENERIC_SKIN)
-        second = fx.render_pair(pack, "verbosity", "terse", "explanatory", fx.GENERIC_SKIN)
+        first = fx.render_pair(
+            pack, "verbosity", "terse", "explanatory", fx.GENERIC_SKIN
+        )
+        second = fx.render_pair(
+            pack, "verbosity", "terse", "explanatory", fx.GENERIC_SKIN
+        )
         assert first == second
 
 
@@ -160,7 +164,9 @@ class TestPairContrastConfinement:
             left_span = fx.contrast_span(pair.left)
             right_span = fx.contrast_span(pair.right)
 
-            assert pair.left.text[: left_span.start] == pair.right.text[: right_span.start]
+            assert (
+                pair.left.text[: left_span.start] == pair.right.text[: right_span.start]
+            )
             assert pair.left.text[left_span.end :] == pair.right.text[right_span.end :]
             assert (
                 pair.left.text[left_span.start : left_span.end]
@@ -239,9 +245,7 @@ class TestRepoSkinSubstitution:
         (noncode / "data.csv").write_text("a,b\n", encoding="utf-8")
         assert fx.scan_repo_skin(noncode) == fx.GENERIC_SKIN
 
-    def test_missing_repo_root_falls_back_to_generic_skin(
-        self, tmp_path: Path
-    ) -> None:
+    def test_missing_repo_root_falls_back_to_generic_skin(self, tmp_path: Path) -> None:
         assert fx.scan_repo_skin(tmp_path / "no-such-dir") == fx.GENERIC_SKIN
 
     def test_generic_skin_still_renders_full_session(self) -> None:

@@ -1,9 +1,12 @@
 .pytest_cache/
+.coverage
+.DS_Store
 .venv/
 __pycache__/
 *.pyc
 *.egg-info/
 build/
 dist/
+_site/
 .gjc/
 .ouroboros_eval_artifact.md

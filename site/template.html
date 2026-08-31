@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="{{lang}}">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{title}}</title>
+  <meta name="description" content="{{description}}">
+  <link rel="canonical" href="{{canonical_url}}">
+  <link rel="alternate" hreflang="en" href="{{en_url}}">
+  <link rel="alternate" hreflang="ko" href="{{ko_url}}">
+  <link rel="alternate" hreflang="x-default" href="{{en_url}}">
+  <link rel="icon" href="{{asset_prefix}}assets/logo.svg" type="image/svg+xml">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="{{title}}">
+  <meta property="og:description" content="{{description}}">
+  <meta property="og:url" content="{{canonical_url}}">
+  <meta property="og:locale" content="{{og_locale}}">
+  <meta property="og:locale:alternate" content="{{og_locale_alt}}">
+  <meta property="og:image" content="{{social_image_url}}">
+  <meta property="og:image:url" content="{{social_image_url}}">
+  <meta property="og:image:alt" content="{{social_image_alt}}">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="{{title}}">
+  <meta name="twitter:description" content="{{description}}">
+  <meta name="twitter:image" content="{{social_image_url}}">
+  <meta name="twitter:image:alt" content="{{social_image_alt}}">
+  <link rel="stylesheet" href="{{asset_prefix}}assets/site.css">
+</head>
+<body>
+  <a class="skip-link" href="#main" tabindex="0">{{skip_to_content}}</a>
+  <header class="site-header">
+    <a class="wordmark" href="#hero" aria-label="{{wordmark}}">
+      <img src="{{asset_prefix}}assets/logo.svg" alt="" width="36" height="36">
+      <span>{{wordmark}}</span>
+    </a>
+    <nav class="primary-navigation" aria-label="{{primary_navigation_label}}">
+      <a href="#mechanism">{{nav_mechanism}}</a>
+      <a href="#start">{{nav_start}}</a>
+      <a href="#boundaries">{{nav_boundaries}}</a>
+      <a href="#share">{{nav_share}}</a>
+    </nav>
+    <nav class="language" aria-label="{{language_label}}">
+      <a href="{{en_href}}" class="{{en_current}}" aria-current="{{en_current}}">{{english}}</a>
+      <a href="{{ko_href}}" class="{{ko_current}}" aria-current="{{ko_current}}">{{korean}}</a>
+    </nav>
+    <a class="header-repository" href="{{repository_url}}">{{footer_repository}}</a>
+  </header>
+
+  <main id="main">
+    <section id="hero" aria-labelledby="hero-title" class="hero">
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow">{{hero_eyebrow}}</p>
+          <h1 id="hero-title">{{hero_title}}</h1>
+          <p class="hero-body">{{hero_body}}</p>
+          <p class="proof-line">{{proof_line}}</p>
+          <div class="actions">
+            <a class="button" href="#mechanism">{{hero_mechanism_cta}}</a>
+            <a class="button button-secondary" href="{{repository_releases_url}}">{{hero_releases_cta}}</a>
+          </div>
+        </div>
+        <img class="hero-poster" src="{{asset_prefix}}assets/hero.svg"
+             alt="{{hero_image_alt}}" width="1200" height="420">
+      </div>
+      <ul class="trust-strip" aria-label="{{trust_label}}">
+        <li>v{{version}}</li>
+        <li>{{trust_python}}</li>
+        <li>{{trust_license}}</li>
+        <li>{{trust_dependencies}}</li>
+        <li>{{trust_runtime}}</li>
+      </ul>
+      <details class="demo-disclosure">
+        <summary>{{demo_summary}}</summary>
+        <img src="{{asset_prefix}}assets/demo.gif" alt="{{demo_alt}}"
+             width="960" height="608" loading="lazy">
+      </details>
+    </section>
+
+    <section id="mechanism" aria-labelledby="mechanism-title">
+      <p class="eyebrow">{{mechanism_label}}</p>
+      <h2 id="mechanism-title">{{mechanism_title}}</h2>
+      <p class="section-intro">{{mechanism_intro}}</p>
+      <div class="contrast-grid">
+        <article class="transcript falsified">
+          <p class="card-label"><span class="strike-mark" aria-hidden="true">×</span> {{falsified_label}}</p>
+          <del>{{left_transcript}}</del>
+        </article>
+        <article class="transcript survivor">
+          <p class="card-label">{{survivor_label}}</p>
+          <p>{{right_transcript}}</p>
+        </article>
+      </div>
+      <div class="proof-rail" aria-label="{{contrast_label}}">
+        <span>{{rail_hypotheses}}</span><b aria-hidden="true">→</b><span>{{rail_falsified}}</span><b aria-hidden="true">→</b><strong>{{rail_result}}</strong>
+      </div>
+      <p class="rail-caption">{{rail_caption}}</p>
+      <div class="rule"><p class="card-label">{{rule_label}}</p><code>{{rule_text}}</code></div>
+    </section>
+
+    <section id="start" aria-labelledby="start-title">
+      <p class="eyebrow">{{start_label}}</p>
+      <h2 id="start-title">{{start_title}}</h2>
+      <ol class="steps">
+        <li><h3>{{step_one_title}}</h3><p>{{step_one_body}}</p><div class="commands"><code>python3 verify_checksums.py SHA256SUMS --only popper-plugin-{{version}}.zip verify_checksums.py</code><code>test ! -e "$HOME/.local/share/popper-plugin-{{version}}"</code><code>python3 -m zipfile -e popper-plugin-{{version}}.zip "$HOME/.local/share/popper-plugin-{{version}}"</code></div></li>
+        <li><h3>{{step_two_title}}</h3><p>{{step_two_body}}</p><div class="commands"><code>claude plugin marketplace add "$HOME/.local/share/popper-plugin-{{version}}"</code><code>claude plugin install popper@popper-marketplace</code></div></li>
+        <li><h3>{{step_three_title}}</h3><p>{{step_three_body}}</p><div class="commands"><code>{{open_command}}</code><code>{{enable_command}}</code><code>{{status_command}}</code></div></li>
+      </ol>
+    </section>
+
+    <section id="boundaries" aria-labelledby="boundaries-title">
+      <p class="eyebrow">{{boundaries_label}}</p>
+      <h2 id="boundaries-title">{{boundaries_title}}</h2>
+      <div class="boundary-grid">
+        <article><h3>{{boundary_local_title}}</h3><p>{{boundary_local_body}}</p></article>
+        <article><h3>{{boundary_runtime_title}}</h3><p>{{boundary_runtime_body}}</p></article>
+        <article><h3>{{boundary_replay_title}}</h3><p>{{boundary_replay_body}}</p></article>
+        <article><h3>{{boundary_activation_title}}</h3><p>{{boundary_activation_body}}</p></article>
+      </div>
+    </section>
+
+    <section id="share" aria-labelledby="share-title">
+      <p class="eyebrow">{{share_label}}</p>
+      <h2 id="share-title">{{share_title}}</h2>
+      <blockquote>{{share_sentence}}</blockquote>
+      <div class="share-links"><a href="{{repository_readme_url}}">{{share_readme}}</a><a href="{{repository_releases_url}}">{{share_releases}}</a></div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div><p>{{footer_note}}</p><p>{{hosting_note}} <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">{{hosting_link}}</a></p></div>
+    <a href="{{repository_url}}">{{footer_repository}}</a>
+  </footer>
+</body>
+</html>

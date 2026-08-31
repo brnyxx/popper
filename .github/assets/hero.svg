@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="420" viewBox="0 0 1200 420" role="img" aria-labelledby="title desc">
+  <title id="title">Popper — falsification first</title>
+  <desc id="desc">Contrast a pair, strike the wrong side, narrow 6,561 hypotheses into executable rules.</desc>
+  <rect width="1200" height="420" fill="#F7F3EA"/>
+  <g stroke="#171717" stroke-width="6" stroke-linejoin="round">
+    <rect x="54" y="66" width="128" height="128" rx="12" fill="#F7F3EA"/>
+    <rect x="220" y="66" width="128" height="128" rx="12" fill="#D9D4C9"/>
+  </g>
+  <path d="M63 75L173 185" stroke="#D92332" stroke-width="15" stroke-linecap="round"/>
+  <text x="54" y="246" fill="#6E6A63" font-family="system-ui, sans-serif" font-size="17" letter-spacing="2">CONTRAST PAIR</text>
+  <g fill="#171717">
+    <circle cx="78" cy="302" r="7"/><circle cx="108" cy="302" r="7"/><circle cx="138" cy="302" r="7"/>
+    <circle cx="78" cy="332" r="7"/><circle cx="108" cy="332" r="7"/><circle cx="138" cy="332" r="7"/>
+    <circle cx="78" cy="362" r="7"/><circle cx="108" cy="362" r="7"/><circle cx="138" cy="362" r="7"/>
+  </g>
+  <path d="M165 332H270" stroke="#171717" stroke-width="7" stroke-linecap="round"/><path d="M258 320L272 332L258 344" fill="none" stroke="#171717" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="310" cy="332" r="22" fill="#D92332" stroke="#171717" stroke-width="7"/><path d="M299 332L307 340L322 323" fill="none" stroke="#F7F3EA" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="430" y="118" fill="#171717" font-family="system-ui, sans-serif" font-size="76" font-weight="700" letter-spacing="8">POPPER</text>
+  <path d="M434 142H1110" stroke="#D92332" stroke-width="5"/>
+  <text x="434" y="218" fill="#171717" font-family="ui-monospace, monospace" font-size="46" font-weight="700">6,561 → RULES</text>
+  <text x="434" y="278" fill="#6E6A63" font-family="ui-monospace, monospace" font-size="19" letter-spacing="1">NARROW THE SPACE. KEEP THE SURVIVOR.</text>
+  <text x="434" y="354" fill="#171717" font-family="system-ui, sans-serif" font-size="25" font-weight="700" letter-spacing="1">NO QUESTIONS. STRIKE THE WRONG SIDE.</text>
+</svg>

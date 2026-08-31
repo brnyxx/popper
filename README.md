@@ -1,202 +1,230 @@
-# Popper
+<div align="center">
 
-반증(Popperian falsification)을 UX 문법으로 삼는 Claude Code 설정 수렴 도구.
+<h1>Popper</h1>
 
-설정 인터뷰 대신, 같은 장면을 서로 다른 방식으로 수행한 **대비 페어
-트랜스크립트**를 제시한다. 사용자의 유일한 동사는 **긋기**(빨간펜)다.
-틀렸다고 보이는 쪽을 그으면 그 값이 8축 x 3값 가설 공간(6,561조합)에서
-빠지고, 살아남은 조합이 실행 가능한 룰로 컴파일된다. 확인/승인/예-아니오
-컨트롤은 어디에도 없다 - 생존은 승인이 아니라 "아직 반증 안 됨"이다.
+<img src=".github/assets/logo.svg" alt="Popper logo: a contrast pair with one side struck in red, narrowing hypotheses to one survivor" width="96">
 
-- 세션 런타임에 LLM 호출 0회, 네트워크 호출 0회 (로컬 픽스처 + 순수 fold만)
-- 모든 상태는 append-only 이벤트 스트림의 파생값 (replay 결정적)
-- 산출물은 `~/.claude/popper/` 단독 소유 - 사용자 파일은 허가된 @import 한 줄 외 무변경
+<img src=".github/assets/hero.svg" alt="Popper — contrast a pair, strike the wrong side, narrow 6,561 preference hypotheses into executable rules" width="920">
 
-## Quickstart
+**Preference, by elimination.**
 
-origin 없는 Popper 소스 체크아웃 루트에서 로컬 marketplace로 설치하고 첫
-진단을 실행한다.
+[한국어](README.ko.md)
+
+</div>
+
+Popper replaces setup interviews with one verb: **strike the wrong side**. It shows two concrete coding-agent behaviors, records what you reject, and compiles the surviving preferences into local Claude Code rules.
+
+**v1.2.0 · Python 3.10–3.14 · MIT · zero third-party Python runtime packages · zero runtime LLM/external-network calls**
+
+<details>
+<summary><strong>Watch a real 15-strike session</strong> (1.6 MB GIF)</summary>
+<br>
+<img src=".github/assets/demo.gif" alt="The real Popper browser UI progressing from zero to fifteen strikes, compiling local rules, and completing the session" width="860">
+</details>
+
+## Start here
+
+Download `popper-plugin-1.2.0.zip`, `SHA256SUMS`, and `verify_checksums.py` from the [v1.2.0 release](../../releases/tag/v1.2.0). Keep all three in one directory and verify before extraction.
+
+macOS or Linux:
 
 ```bash
-claude plugin marketplace add "$PWD"
+python3 verify_checksums.py SHA256SUMS \
+  --only popper-plugin-1.2.0.zip verify_checksums.py
+DEST="$HOME/.local/share/popper-plugin-1.2.0"
+test ! -e "$DEST" || { echo "destination already exists: $DEST" >&2; exit 1; }
+python3 -m zipfile -e popper-plugin-1.2.0.zip "$DEST"
+claude plugin marketplace add "$DEST"
 claude plugin install popper@popper-marketplace
 ```
 
-새 Claude Code 세션에서:
+Windows PowerShell:
+
+```powershell
+py -3 verify_checksums.py SHA256SUMS `
+  --only popper-plugin-1.2.0.zip verify_checksums.py
+$Dest = Join-Path $env:LOCALAPPDATA "Popper\plugin-1.2.0"
+if (Test-Path $Dest) { throw "destination already exists: $Dest" }
+py -3 -m zipfile -e popper-plugin-1.2.0.zip $Dest
+claude plugin marketplace add $Dest
+claude plugin install popper@popper-marketplace
+```
+
+Start a fresh Claude Code session and run:
 
 ```text
 /popper:popper doctor
 /popper:popper open
 ```
 
-브라우저에서 15번 긋고 나면 규칙이 `~/.claude/popper/`에 착지한다.
-중간에 터미널이나 브라우저가 닫혀도 같은 `open` 명령이 유일한 미완료 일반
-세션을 저장된 슬롯부터 계속한다. 여러 미완료 세션이 있으면
-`/popper:popper sessions`로 ID를 보고 `resume <id>`를 사용한다.
+Strike one side of each contrast pair. After the fifteenth strike, Popper lands three owned artifacts in `~/.claude/popper/`:
 
-## CLI
-
-런타임은 Python 표준 라이브러리만 사용한다.
-
-```bash
-popper open                     # 미완료 1건 자동 재개, 없으면 새 일반 세션
-popper resume [session-id]      # product/validation/recheck 중단 세션 재개
-popper sessions [session-id]    # 최근 목록 또는 bounded 이벤트 상세
-popper status [--json]          # 착지/활성화/재개/판정 진실
-popper doctor [--json]          # 설치·봉인·replay·loopback 로컬 진단
-popper recheck                  # 재심 큐 선두 5-7긋기
-popper validate                 # 판별 13 + 미러 프로브 2
-popper export --format agents   # markdown/agents/claude/json
+```text
+POPPER.md
+manifest.json
+settings.popper.json
 ```
 
-소스 체크아웃에서는 `pip install -e .`, 릴리스 파일에서는
-`pip install popper-1.1.0-py3-none-any.whl`로 `popper` 명령을 설치한다.
-wheel에는 픽스처, 봉인 문서, 정답지가 모두 포함된다.
+Activation is separate and explicit:
 
-### Claude Code 플러그인으로
-
-```bash
-claude --plugin-dir /path/to/popper
+```text
+/popper:popper enable
+/popper:popper status
 ```
 
-이후 `/popper:popper` 스킬로 세션을 연다. 재심 대기 배너가 있으면 스킬이
-먼저 알려준다. 플러그인 런처는 호출한 프로젝트의 `$PWD`를 보존해
-`--repo "$PWD"`로 전달하므로 generic fixture로 조용히 퇴행하지 않는다.
+`enable` adds one owned `@import` line to `~/.claude/CLAUDE.md`. `/popper:popper rollback` removes only that line.
 
-## 세션 계약
-
-| 프로파일 | 슬롯 | 구성 | 완주 시 |
-|---|---|---|---|
-| product | 15 | 판별 15, 프로브 0 | `~/.claude/popper/` 착지 |
-| validation | 15 | 판별 13 + 슬롯 9/13 미러 프로브 2 | 착지 없음 (판정 표본만 적재) |
-| recheck | 5-7 | 재심 큐 선두 (불안정 > untested-prior > 충돌) | 재착지 + last_review 갱신 |
-
-- 완전 판별 축이 5 미만이면 `session_voided(axis_shortfall)` - 착지하지 않는다.
-- 오긋기 복구는 명시 이벤트 채널뿐이다: **마지막 긋기 무르기**(undo_tombstone),
-  막 경계의 revive, 축 3값 전멸 시 모순 이벤트. 무른 슬롯은 돌려주지 않는다 -
-  캡은 봉인 수치다.
-- 판정 영향 수치(cap 15, N_val 2, floor 5 등)의 소유자는 봉인 사전등록 문서
-  `docs/prereg/prereg_sealed.json`이다. 코드는 수치를 소유하지 않는다.
-
-## 반복 사용과 복구
-
-- 각 선택은 즉시 세션 JSONL에 append되고 화면은 replay 결과만 보여 준다.
-- 시작 이벤트가 fixture catalog, 세션 규격, 파일 내용이 아닌 repo skin을 봉인해
-  다른 프로젝트나 변경된 배포물로 잘못 replay하지 않는다.
-- `popper open`은 미완료 일반 세션이 정확히 하나일 때 자동 재개한다.
-- 여러 미완료 세션은 임의 선택하지 않고 `popper resume <id>`를 요구한다.
-- 같은 소유 디렉토리에서 두 대화형 세션을 동시에 열면 base 수명주기 잠금이
-  두 번째 admission을 세션 생성 전에 거부한다.
-- 연결이 끊긴 웹 화면은 `popper resume`로 저장된 마지막 슬롯부터 이어진다고
-  `role=alert`로 알린다.
-- `popper data backup /safe/path/popper.zip`은 잠금 안에서 원자 snapshot과
-  SHA-256 sidecar를 만들며, `popper data inspect <zip> --json`은 추출 없이
-  경로·크기·checksum을 검증한다. producer와 inspector는 같은 9,999파일/
-  128 MiB payload 한도를 적용한다. 자동 restore나 silent repair는 없다.
-
-## 산출물
-
-세션 완주 시 `~/.claude/popper/`에 착지한다.
-
-- `POPPER.md` - 8축 전부의 실행 가능한 룰만 (인식론 주석 0줄)
-- `manifest.json` - 룰별 corroboration 등급, value_source, content hash,
-  last_review, 재심 큐, 충돌 리포트
-- `settings.popper.json` - 제안 파일 (라이브 settings.json에 자동 병합하지 않는다)
-- `sessions/*.jsonl` - append-only 이벤트 스트림 (단일 진실원)
-
-활성화와 롤백:
+A source checkout can be installed without a release archive:
 
 ```bash
-popper enable --grant    # CLAUDE.md 끝에 @import 한 줄 추가 (허가 기록)
-popper rollback          # 그 한 줄만 제거 - 전체 롤백 지점
-```
-
-`popper status`는 생성과 소비를 섞지 않고 `inactive`, `active`,
-`import-drift` 중 하나와 정확한 다음 명령을 보여 준다. Claude 외 호스트에는
-자동으로 파일을 쓰지 않는다:
-
-```bash
-popper export --format agents --output ./AGENTS.md
-popper export --format markdown
-popper export --format json > popper-rules.json
-```
-
-착지된 파일을 수기로 편집하면 다음 착지가 **차단**된다 (content hash 불일치 =
-최강 strike 신호, silent overwrite 금지). 의도한 편집이면:
-
-```bash
-popper land --acknowledge-mismatch
-```
-
-## 자기반증
-
-이 도구의 핵심 추측("긋기만으로 설정이 수렴한다")도 반증 대상이다.
-검증 세션 누적 + 봉인 정답지 5분류 채점으로 `refutation_condition_met`은
-기계(fold)가 방출하고, 확정은 인간의 `refutation_acknowledged`로만 게이트된다.
-
-```bash
-popper status                     # 판정 fold 현황
-popper acknowledge --actor <이름>  # 조건 성립 후 인간 확정
-```
-
-## 벤치마크에서 가져온 것과 버린 것
-
-- **Paperthin에서 가져온 것:** 설치→첫 호출→검증의 짧은 흐름, 얇은 스킬
-  어댑터, 사용자 호출 권한, manifest/문서 동기화 게이트.
-- **Ouroboros에서 가져온 것:** 이벤트 replay 기반 중단 재개, bounded 세션
-  목록, 완전 로컬 doctor, 명시적 backup/inspect.
-- **의도적으로 버린 것:** 스킬 수 경쟁, 모델 오케스트레이션, MCP/daemon,
-  텔레메트리, 자동 업데이트, 클라우드 동기화. Popper 런타임은 계속 LLM과
-  외부 네트워크를 한 번도 호출하지 않는다.
-
-## 개발
-
-```bash
-python3 -m pytest tests/ -q    # 전체 스위트
-```
-
-모듈 구성: `events`(strike-only 스키마) / `counter`(6,561 fold) /
-`recovery`(undo·revive·모순) / `compiler`(룰 + manifest) / `writer`(소유권 분리)
-/ `conflict`(수기 룰 충돌) / `session`(프로파일 봉인) / `judgment`(자기반증 fold)
-/ `recheck`(4막 재심) / `scoring`(5분류 채점) / `fixtures`(고정 픽스처 렌더) /
-`store`(append-only JSONL) / `sessions`(요약·재개) / `doctor`(로컬 진단) /
-`backup`(snapshot 검사) / `exporter`(호스트 중립 출력) /
-`web`(콜드 오픈 UI) / `cli`(진입점).
-
-## 지원 환경 및 GA 설치
-
-Popper 1.1.0은 Python 3.10–3.14, macOS/Linux/Windows에서 지원된다.
-브라우저 검증은 Chromium, Firefox, WebKit을 사용한다.
-
-릴리스 ZIP만 받은 경우 다음 경로에 풀어 같은 로컬 marketplace로 등록한다:
-
-```bash
-mkdir -p "$HOME/.local/share/popper-1.1.0"
-python3 -m zipfile -e popper-plugin-1.1.0.zip "$HOME/.local/share/popper-1.1.0"
-claude plugin marketplace add "$HOME/.local/share/popper-1.1.0"
+claude plugin marketplace add "$PWD"
 claude plugin install popper@popper-marketplace
 ```
 
-체크아웃한 플러그인을 시험할 때는 다음처럼 로컬 경로를 지정한다:
+Package installation may contact the selected package or plugin registry. Once Popper runs, its session runtime makes no LLM or external-network calls; the browser talks only to Popper's loopback HTTP server.
 
-```bash
-claude --plugin-dir /path/to/popper
+## See one strike
+
+Popper begins with `3⁸ = 6,561` preference hypotheses: eight axes with three values each. A contrast pair turns one hidden preference into visible behavior:
+
+| Falsified | Survivor |
+|---|---|
+| ~~Before fixing pagination, ask whether tests and cleanup are in scope.~~ | Fix pagination, run focused tests, then report the change and evidence. |
+
+One rejected value narrows the space from `6,561` to `4,374`. Repeated evidence eventually compiles a rule such as:
+
+```text
+Act first, run focused verification, then report the change and evidence.
 ```
 
-런타임은 loopback 로컬 서버와 고정 fixture만 사용하며 외부 네트워크나
-- 세션 이벤트와 생성물은 `~/.claude/popper/`에만
-기록하고, 사용자 파일에는 허가된 `@import` 한 줄만 쓴다. 민감한 파일을
-fixture나 프롬프트에 넣지 말고, 플러그인 권한과 로컬 파일 접근을 검토한
-뒤 실행한다.
+The browser UI is the product interaction—not a questionnaire and not a prompt that guesses on your behalf. A strike is persisted immediately as an append-only event; every screen is rebuilt from replay.
 
-이벤트 append와 산출물 착지는 프로세스 간 파일 잠금으로 직렬화되며, 파일은
-같은 디렉토리의 임시 파일을 `os.replace`하는 방식으로 원자 교체된다. 진행 중인
-다른 세션은 착지 fold에서 제외된다. 웹 서버는 루프백 외 바인딩과 신뢰되지 않은
-Host/Origin을 거부하고 세션 완료 응답 후 자동 종료된다.
+## Pick the right command
 
-릴리스 파일은 SHA-256으로 검증할 수 있다:
+### Inside Claude Code (primary plugin surface)
+
+| You want to… | Command | Boundary |
+|---|---|---|
+| Start or continue the normal flow | `/popper:popper open` | Resumes the only unfinished product session; otherwise opens a new 15-strike session |
+| Resume a specific interrupted flow | `/popper:popper resume SESSION_ID` | Replays the selected product, validation, or recheck session from sealed context |
+| List sessions | `/popper:popper sessions` | Foreground local view; no delete or rewrite path |
+| Diagnose an installation | `/popper:popper doctor` | Checks package data, seals, replay, landing integrity, and loopback binding |
+| Review landed state | `/popper:popper status` | Distinguishes `inactive`, `active`, and `import-drift` |
+| Revisit unstable rules | `/popper:popper recheck` | Manual 5–7 strike review; no daemon or background poller |
+| Run the sealed validation profile | `/popper:popper validate` | 13 discriminative slots plus two mirrored probes |
+| Activate or roll back | `/popper:popper enable` / `/popper:popper rollback` | The plugin adapter translates an explicit `enable` request to the consent-gated `enable --grant`; rollback removes only a receipt-owned import |
+
+### Installed wheel or `popper` console
+
+| You want to… | Command |
+|---|---|
+| Inspect a session as JSON | `popper sessions SESSION_ID --json` |
+| Export for another agent | `popper export --format agents --output AGENTS.md` |
+| Create a portable snapshot | `popper data backup /safe/path/popper.zip` |
+| Inspect a snapshot without extraction | `popper data inspect popper.zip --json` |
+| Activate with explicit consent | `popper enable --grant` |
+
+`python -m popper ...` is equivalent to the `popper ...` console command.
+
+## Designed to survive interruption
+
+- Every accepted action is fsynced to a per-session append-only JSONL stream.
+- A base-wide process lock admits one interactive server before session creation.
+- A session seals its fixture catalog, session specification, repository skin, and canonical rendered-pair digest.
+- A process killed after the last strike finalizes and lands idempotently on resume.
+- Partial JSONL records and partial landing sets fail closed instead of being silently repaired.
+- The loopback server rejects non-loopback binding, invalid Host/Origin headers, and stale pair submissions.
+- Completing a session shuts the server down; no idle background process remains.
+
+## Local by construction
+
+Popper owns `~/.claude/popper/` and does not silently edit project files. It does not:
+
+- call a model or external service during a session;
+- collect telemetry, analytics, cookies, or browser storage;
+- infer a preference that was not exposed as a contrast and struck;
+- auto-update, auto-activate, or silently reset damaged data;
+- copy the Paperthin skill catalog or Ouroboros orchestration runtime.
+
+The generated GitHub Pages site follows the same boundary: bilingual static HTML/CSS, repository-local assets, no JavaScript, no analytics, and no remote runtime resources. [`scripts/build_site.py`](scripts/build_site.py) validates locale parity, links, SEO metadata, accessibility structure, and the exact deploy artifact before the SHA-pinned [Pages workflow](.github/workflows/pages.yml) can publish it.
+
+## Share and verify
+
+Rules can be shared without exposing the complete event history:
 
 ```bash
-sha256sum -c SHA256SUMS
-python -m zipfile -l popper-plugin-1.1.0.zip
+popper export --format markdown > POPPER.export.md
+popper export --format agents --output AGENTS.md
+popper export --format json > popper-rules.json
 ```
+
+Release assets include a wheel, source archive, Claude plugin ZIP, standalone verifier, `SHA256SUMS`, and GitHub artifact provenance. After downloading the artifacts you need, verify them with the standard-library script:
+
+```bash
+python3 verify_checksums.py SHA256SUMS \
+  --only popper-plugin-1.2.0.zip verify_checksums.py
+```
+
+A release is published only after the Python matrix, Chromium/Firefox/WebKit completion-and-recovery E2E, clean Claude marketplace install, plugin lifecycle, package build, and manifest-version gates pass. GitHub Actions and release actions are pinned to reviewed commit SHAs; the Claude CLI used by CI is pinned to an exact version.
+
+## Update
+
+Popper never performs a background version check.
+
+### Move an existing v1.1.0 marketplace to v1.2.0
+
+The v1.1.0 instructions registered `~/.local/share/popper-1.1.0`. Re-register the marketplace so Claude does not keep reading that old source:
+
+```bash
+python3 verify_checksums.py SHA256SUMS \
+  --only popper-plugin-1.2.0.zip verify_checksums.py
+DEST="$HOME/.local/share/popper-plugin-1.2.0"
+test ! -e "$DEST" || { echo "destination already exists: $DEST" >&2; exit 1; }
+python3 -m zipfile -e popper-plugin-1.2.0.zip "$DEST"
+claude plugin marketplace remove popper-marketplace
+claude plugin marketplace add "$DEST"
+claude plugin update popper@popper-marketplace
+```
+
+Restart Claude Code and run `/popper:popper doctor`. Only after it reports healthy may you remove `~/.local/share/popper-1.1.0`.
+
+### Later releases
+
+Replace `X.Y.Z` below with the exact release version and extract into a fresh directory:
+
+```bash
+VERSION=X.Y.Z
+python3 verify_checksums.py SHA256SUMS \
+  --only "popper-plugin-${VERSION}.zip" verify_checksums.py
+DEST="$HOME/.local/share/popper-plugin-${VERSION}"
+test ! -e "$DEST" || { echo "destination already exists: $DEST" >&2; exit 1; }
+python3 -m zipfile -e "popper-plugin-${VERSION}.zip" "$DEST"
+claude plugin marketplace remove popper-marketplace
+claude plugin marketplace add "$DEST"
+claude plugin marketplace update popper-marketplace
+claude plugin update popper@popper-marketplace
+```
+
+Restart Claude Code, then run `/popper:popper doctor`. Existing events and landed rules remain outside the plugin package. Remove the old versioned plugin directory only after the new installation passes `doctor`.
+
+## Development
+
+```bash
+python3 -m pip install -e '.[test,e2e,release]'
+python3 -m pytest tests/ -q
+python3 scripts/build_site.py \
+  --output /tmp/popper-pages \
+  --site-url "$POPPER_SITE_URL" \
+  --repository-url "$POPPER_REPOSITORY_URL"
+claude plugin validate .
+```
+
+CI covers Python 3.10–3.14, macOS/Linux/Windows, Chromium/Firefox/WebKit, clean plugin installation, wheel/sdist validation, deterministic plugin packaging, and Pages contracts.
+
+## Scope
+
+Popper is deliberately narrow. It converges eight frozen preference axes through explicit rejection. It is not a general prompt manager, cloud profile service, autonomous agent orchestrator, or replacement for project-specific instructions.
+
+The sealed preregistration lives in [`docs/prereg/prereg_sealed.json`](docs/prereg/prereg_sealed.json). The frozen axis-locality decision table lives in [`docs/axis_locality_table.md`](docs/axis_locality_table.md).
+
+MIT © 2026 Brian Kim.

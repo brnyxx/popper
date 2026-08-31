@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">Popper mark</title>
+  <desc id="desc">Two contrasted cards, one struck in crimson, converging through hypothesis dots to one survivor.</desc>
+  <rect width="256" height="256" rx="28" fill="#F7F3EA"/>
+  <g stroke="#171717" stroke-width="7" stroke-linejoin="round">
+    <rect x="24" y="28" width="86" height="86" rx="10" fill="#F7F3EA"/>
+    <rect x="146" y="28" width="86" height="86" rx="10" fill="#D9D4C9"/>
+  </g>
+  <path d="M31 35L103 107" stroke="#D92332" stroke-width="11" stroke-linecap="round"/>
+  <g fill="#171717">
+    <circle cx="42" cy="145" r="7"/><circle cx="72" cy="145" r="7"/><circle cx="102" cy="145" r="7"/>
+    <circle cx="42" cy="175" r="7"/><circle cx="72" cy="175" r="7"/><circle cx="102" cy="175" r="7"/>
+    <circle cx="42" cy="205" r="7"/><circle cx="72" cy="205" r="7"/><circle cx="102" cy="205" r="7"/>
+  </g>
+  <path d="M112 176H153" stroke="#171717" stroke-width="7" stroke-linecap="round"/>
+  <path d="M145 166L155 176L145 186" fill="none" stroke="#171717" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="196" cy="176" r="18" fill="#D92332" stroke="#171717" stroke-width="7"/>
+  <path d="M187 176L193 182L205 168" fill="none" stroke="#F7F3EA" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

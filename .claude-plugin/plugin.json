@@ -1,10 +1,10 @@
 {
   "name": "popper",
   "displayName": "Popper",
-  "version": "1.1.0",
-  "description": "반증(긋기)만으로 Claude Code 설정을 수렴시키는 도구 - 질문 0개, 승인 0개, 로컬 웹 UI 한 장",
+  "version": "1.2.0",
+  "description": "Strike the wrong agent behavior; Popper compiles surviving preferences into local Claude Code rules.",
   "author": {
-    "name": "kim62210"
+    "name": "Brian Kim"
   },
-  "keywords": ["falsification", "settings", "claude-md", "popper"]
+  "keywords": ["falsification", "preferences", "local-first", "claude-code", "agent-skills"]
 }

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Build a deterministic Popper Claude Code plugin archive."""
+
 from __future__ import annotations
 
 import argparse
@@ -8,7 +9,13 @@ from pathlib import Path
 import stat
 import zipfile
 
-ROOT_FILES = ("LICENSE", "README.md", "pyproject.toml", "scripts/popper_plugin.py")
+ROOT_FILES = (
+    "LICENSE",
+    "README.md",
+    "README.ko.md",
+    "pyproject.toml",
+    "scripts/popper_plugin.py",
+)
 DIRECTORIES = (".claude-plugin", "skills", "popper")
 EXCLUDED_PARTS = {
     "__pycache__",

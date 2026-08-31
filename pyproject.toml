@@ -4,17 +4,18 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "popper"
-version = "1.1.0"
-description = "반증(긋기)만으로 Claude Code 설정을 수렴시키는 도구 - 런타임 LLM/네트워크 호출 0회"
+version = "1.2.0"
+description = "Falsification-first preference convergence for Claude Code — zero runtime LLM or external-network calls"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [{ name = "Brian Kim", email = "kim62210@gmail.com" }]
 dependencies = []
-keywords = ["claude-code", "plugin", "preferences", "falsification"]
+keywords = ["claude-code", "plugin", "preferences", "falsification", "local-first", "agent-skills"]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Environment :: Console",
+    "Intended Audience :: Developers",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
@@ -22,10 +23,11 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development",
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<10"]
+test = ["pytest>=8,<9", "PyYAML>=6,<7"]
 e2e = ["playwright>=1.50,<2"]
 release = ["build>=1.2,<2", "twine>=5,<7"]
 
