@@ -302,7 +302,8 @@ def test_void_session_instances_count_for_neither_side() -> None:
     assert not only_void.condition_met
 
 
-def test_non_validation_profiles_do_not_count_as_validation_evidence() -> None:
+def test_non_validation_profiles_do_not_count_as_validation_evidence(caplog) -> None:
+    caplog.set_level("WARNING", logger="popper.judgment")
     product = validated(N_INSTANCES, 0, 0, event_id="product")
     product.payload["profile"] = "product"
     recheck = validated(N_INSTANCES, 0, 0, event_id="recheck")
@@ -313,6 +314,7 @@ def test_non_validation_profiles_do_not_count_as_validation_evidence() -> None:
     assert state.valid_sessions == 0
     assert state.discriminative_instances == 0
     assert len(state.rejected) == 2
+    assert not caplog.records
 
 
 # --- 저장 금지와 replay 결정성 ----------------------------------------------
