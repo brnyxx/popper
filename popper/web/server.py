@@ -21,6 +21,7 @@ import logging
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from threading import Event, Lock, Thread
 from typing import Any
 
 from popper.events import SchemaViolation
@@ -60,14 +61,33 @@ class ColdOpenServer(ThreadingHTTPServer):
         server_address: tuple[str, int],
         handler_class: type[BaseHTTPRequestHandler],
         session: ColdOpenSession,
+        *,
+        shutdown_on_complete: bool = True,
     ) -> None:
         self.session = session
+        self.shutdown_on_complete = shutdown_on_complete
+        self.shutdown_requested = Event()
+        self._shutdown_guard = Lock()
         super().__init__(server_address, handler_class)
 
     @property
     def url(self) -> str:
         host, port = self.server_address[0], self.server_address[1]
         return f"http://{host}:{port}/"
+
+    def request_shutdown(self) -> None:
+        """완료 응답을 보낸 요청 스레드 밖에서 serve_forever를 한 번만 종료한다."""
+        if not self.shutdown_on_complete or self.shutdown_requested.is_set():
+            return
+        with self._shutdown_guard:
+            if self.shutdown_requested.is_set():
+                return
+            self.shutdown_requested.set()
+            Thread(
+                target=self.shutdown,
+                name=f"popper-shutdown-{self.server_address[1]}",
+                daemon=True,
+            ).start()
 
 
 class ColdOpenHandler(BaseHTTPRequestHandler):
@@ -135,6 +155,8 @@ class ColdOpenHandler(BaseHTTPRequestHandler):
             )
             return
         self._send_json(HTTPStatus.OK, snapshot.to_dict())
+        if snapshot.session_complete:
+            self.server.request_shutdown()
 
     def _handle_undo(self) -> None:
         try:
@@ -194,6 +216,7 @@ def build_server(
     host: str = HOST,
     port: int = EPHEMERAL_PORT,
     repo_root: Path | str | None = None,
+    shutdown_on_complete: bool = True,
     **session_kwargs: Any,
 ) -> ColdOpenServer:
     """바인딩까지 끝난 서버를 돌려준다 - 세션이 없으면 여기서 콜드 오픈한다."""
@@ -202,7 +225,12 @@ def build_server(
         if session is not None
         else ColdOpenSession(repo_root=repo_root, **session_kwargs)
     )
-    server = ColdOpenServer((host, port), ColdOpenHandler, active)
+    server = ColdOpenServer(
+        (host, port),
+        ColdOpenHandler,
+        active,
+        shutdown_on_complete=shutdown_on_complete,
+    )
     logger.info("콜드 오픈 서버 대기: %s", server.url)
     return server
 

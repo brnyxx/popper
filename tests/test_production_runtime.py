@@ -451,8 +451,16 @@ class ServerEndpointTest(unittest.TestCase):
 
     POLL_INTERVAL_SECONDS = 0.02
 
-    def launch(self, session: ColdOpenSession):
-        server = build_server(session=session)
+    def launch(
+        self,
+        session: ColdOpenSession,
+        *,
+        shutdown_on_complete: bool = True,
+    ):
+        server = build_server(
+            session=session,
+            shutdown_on_complete=shutdown_on_complete,
+        )
         thread = threading.Thread(
             target=server.serve_forever,
             args=(self.POLL_INTERVAL_SECONDS,),
@@ -510,7 +518,7 @@ class ServerEndpointTest(unittest.TestCase):
 
     def test_closed_session_rejects_strikes_with_409(self) -> None:
         session = ColdOpenSession(session_id="srv-cap")
-        server = self.launch(session)
+        server = self.launch(session, shutdown_on_complete=False)
         for _ in range(PRODUCT_CAP):
             status, body = self.post(server, "/strike", {"target": "pair"})
             self.assertEqual(status, 200)
@@ -521,6 +529,25 @@ class ServerEndpointTest(unittest.TestCase):
         self.assertEqual(caught.exception.code, 409)
         detail = json.loads(caught.exception.read().decode("utf-8"))
         self.assertEqual(detail["error"], "session_complete")
+
+    def test_completed_session_stops_the_background_server(self) -> None:
+        session = ColdOpenSession(session_id="srv-auto-stop")
+        server = build_server(session=session)
+        thread = threading.Thread(
+            target=server.serve_forever,
+            args=(self.POLL_INTERVAL_SECONDS,),
+            daemon=True,
+        )
+        thread.start()
+        self.addCleanup(server.server_close)
+        for _ in range(PRODUCT_CAP):
+            status, body = self.post(server, "/strike", {"target": "pair"})
+            self.assertEqual(status, 200)
+        self.assertTrue(body["session_complete"])
+
+        thread.join(REQUEST_TIMEOUT_SECONDS)
+        self.assertFalse(thread.is_alive())
+        self.assertTrue(server.shutdown_requested.is_set())
 
 
 if __name__ == "__main__":
