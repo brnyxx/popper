@@ -8,9 +8,12 @@ import os
 import time
 from pathlib import Path
 
+import pytest
+
 from popper.atomic import atomic_write_bytes
 from popper.compiler import MANIFEST_JSON, OUTPUT_FILES, write_outputs
 from popper.events import Event, EventType, StrikeTarget, strike
+from popper.locking import LockTimeout, ProcessFileLock
 from popper.store import EventStore
 from popper.web.state import ColdOpenSession
 
@@ -52,6 +55,12 @@ def _landing_worker(base: str, session_id: str, target: str, barrier) -> None:
         session.strike(target)
     if session.snapshot().landing.status != "landed":
         raise RuntimeError(f"착지 실패: {session.snapshot().landing}")
+
+
+def _hold_lock(path: str, ready, release) -> None:
+    with ProcessFileLock(Path(path)):
+        ready.set()
+        release.wait(10)
 
 
 def _spawn_context():
@@ -100,6 +109,24 @@ def test_atomic_replace_never_exposes_partial_content(tmp_path: Path) -> None:
     assert observations > 0
     assert target.read_bytes() in allowed
     assert not tuple(tmp_path.glob(".*.tmp"))
+
+
+def test_lock_timeout_is_explicit_instead_of_hanging(tmp_path: Path) -> None:
+    context = _spawn_context()
+    path = tmp_path / "held.lock"
+    ready = context.Event()
+    release = context.Event()
+    process = context.Process(target=_hold_lock, args=(str(path), ready, release))
+    process.start()
+    assert ready.wait(10)
+    try:
+        with pytest.raises(LockTimeout):
+            with ProcessFileLock(path, timeout=0.1):
+                pass
+    finally:
+        release.set()
+        process.join(30)
+    assert process.exitcode == 0
 
 
 def test_completed_stream_excludes_other_in_progress_sessions(tmp_path: Path) -> None:

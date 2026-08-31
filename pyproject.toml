@@ -1,13 +1,33 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "popper"
 version = "1.0.0"
 description = "반증(긋기)만으로 Claude Code 설정을 수렴시키는 도구 - 런타임 LLM/네트워크 호출 0회"
+readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["filelock>=3.16,<4"]
+license = "MIT"
+authors = [{ name = "Brian Kim", email = "kim62210@gmail.com" }]
+dependencies = []
+keywords = ["claude-code", "plugin", "preferences", "falsification"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10"]
+e2e = ["playwright>=1.50,<2"]
+release = ["build>=1.2,<2"]
 
 [project.scripts]
 popper = "popper.cli:main"
