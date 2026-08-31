@@ -35,6 +35,12 @@ SESSIONS_DIR = "sessions"
 EVENT_FILE_SUFFIX = ".jsonl"
 
 
+def event_sort_key(event: StrikeEvent | Event) -> tuple[str, str, int, str]:
+    """동일 시각의 교차 세션 이벤트까지 결정적으로 정렬한다."""
+    sequence = event.seq if isinstance(event.seq, int) else -1
+    return event.at, event.session_id, sequence, event.event_id
+
+
 class StoreViolation(RuntimeError):
     """스토어 계약 위반 - 손상된 레코드 또는 잘못된 세션 식별자."""
 
@@ -161,7 +167,7 @@ class EventStore:
             for session_id in self.session_ids():
                 events.extend(self.load_session(session_id))
             # 이벤트의 논리적 기록 시각이 파일 mtime보다 우선한다.
-            events.sort(key=lambda event: event.at)
+            events.sort(key=event_sort_key)
             return tuple(events)
 
     def load_completed(self) -> tuple[StrikeEvent | Event, ...]:

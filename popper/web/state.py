@@ -96,7 +96,7 @@ from popper.scoring import (
     load_ground_truth,
     score_restoration,
 )
-from popper.store import EventStore
+from popper.store import EventStore, event_sort_key
 from popper.writer import OwnedWriter
 
 logger = logging.getLogger(__name__)
@@ -1020,7 +1020,7 @@ class ColdOpenSession:
                         else tuple(
                             sorted(
                                 completed + self._log.events,
-                                key=lambda event: event.at,
+                                key=event_sort_key,
                             )
                         )
                     )

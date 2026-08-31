@@ -18,7 +18,7 @@ Popper shows two concrete ways your coding agent could behave. You cross out the
 
 > **Korean-first v1:** the session UI and generated rule text are Korean. The English README and site explain the product and installation honestly; an English runtime pack is not shipped yet.
 
-**v1.3.0 · Python 3.10–3.14 · MIT · zero third-party Python runtime packages · zero runtime LLM, telemetry, or external-network calls**
+**v1.3.1 · Python 3.10–3.14 · MIT · zero third-party Python runtime packages · zero runtime LLM, telemetry, or external-network calls**
 
 ## The whole product in one example
 
@@ -85,7 +85,7 @@ macOS or Linux:
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install \
-  https://github.com/brnyxx/popper/releases/download/v1.3.0/popper-1.3.0-py3-none-any.whl
+  https://github.com/brnyxx/popper/releases/download/v1.3.1/popper-1.3.1-py3-none-any.whl
 .venv/bin/popper doctor
 .venv/bin/popper open
 ```
@@ -95,7 +95,7 @@ Windows PowerShell:
 ```powershell
 py -3 -m venv .venv
 .venv\Scripts\python -m pip install `
-  https://github.com/brnyxx/popper/releases/download/v1.3.0/popper-1.3.0-py3-none-any.whl
+  https://github.com/brnyxx/popper/releases/download/v1.3.1/popper-1.3.1-py3-none-any.whl
 .venv\Scripts\popper doctor
 .venv\Scripts\popper open
 ```
@@ -111,16 +111,16 @@ Open a fresh Claude Code session and repeat the request that used to trigger the
 
 ## Install inside Claude Code with checksums
 
-Download `popper-plugin-1.3.0.zip`, `SHA256SUMS`, and `verify_checksums.py` from the [v1.3.0 release](../../releases/tag/v1.3.0). Keep all three in one directory and verify before extraction.
+Download `popper-plugin-1.3.1.zip`, `SHA256SUMS`, and `verify_checksums.py` from the [v1.3.1 release](../../releases/tag/v1.3.1). Keep all three in one directory and verify before extraction.
 
 macOS or Linux:
 
 ```bash
 python3 verify_checksums.py SHA256SUMS \
-  --only popper-plugin-1.3.0.zip verify_checksums.py
-DEST="$HOME/.local/share/popper-plugin-1.3.0"
+  --only popper-plugin-1.3.1.zip verify_checksums.py
+DEST="$HOME/.local/share/popper-plugin-1.3.1"
 test ! -e "$DEST" || { echo "destination already exists: $DEST" >&2; exit 1; }
-python3 -m zipfile -e popper-plugin-1.3.0.zip "$DEST"
+python3 -m zipfile -e popper-plugin-1.3.1.zip "$DEST"
 claude plugin marketplace add "$DEST"
 claude plugin install popper@popper-marketplace
 ```
@@ -129,10 +129,10 @@ Windows PowerShell:
 
 ```powershell
 py -3 verify_checksums.py SHA256SUMS `
-  --only popper-plugin-1.3.0.zip verify_checksums.py
-$Dest = Join-Path $env:LOCALAPPDATA "Popper\plugin-1.3.0"
+  --only popper-plugin-1.3.1.zip verify_checksums.py
+$Dest = Join-Path $env:LOCALAPPDATA "Popper\plugin-1.3.1"
 if (Test-Path $Dest) { throw "destination already exists: $Dest" }
-py -3 -m zipfile -e popper-plugin-1.3.0.zip $Dest
+py -3 -m zipfile -e popper-plugin-1.3.1.zip $Dest
 claude plugin marketplace add $Dest
 claude plugin install popper@popper-marketplace
 ```
@@ -221,14 +221,14 @@ Verify downloaded release assets:
 
 ```bash
 python3 verify_checksums.py SHA256SUMS \
-  --only popper-plugin-1.3.0.zip verify_checksums.py
+  --only popper-plugin-1.3.1.zip verify_checksums.py
 ```
 
-To move an older marketplace install to v1.3.0, extract into a fresh versioned directory, then re-register it:
+To move an older marketplace install to v1.3.1, extract into a fresh versioned directory, then re-register it:
 
 ```bash
-DEST="$HOME/.local/share/popper-plugin-1.3.0"
-python3 -m zipfile -e popper-plugin-1.3.0.zip "$DEST"
+DEST="$HOME/.local/share/popper-plugin-1.3.1"
+python3 -m zipfile -e popper-plugin-1.3.1.zip "$DEST"
 claude plugin marketplace remove popper-marketplace
 claude plugin marketplace add "$DEST"
 claude plugin update popper@popper-marketplace
@@ -245,7 +245,7 @@ To remove the plugin while keeping your evidence and rules:
 ```bash
 claude plugin uninstall popper@popper-marketplace
 claude plugin marketplace remove popper-marketplace
-rm -rf "$HOME/.local/share/popper-plugin-1.3.0"
+rm -rf "$HOME/.local/share/popper-plugin-1.3.1"
 ```
 
 `~/.claude/popper/` is user data and is deliberately retained. Back it up first; delete that directory only when you intentionally want to destroy the event history and generated rules.

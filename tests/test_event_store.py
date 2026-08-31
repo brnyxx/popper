@@ -9,7 +9,7 @@ from pathlib import Path
 
 from popper.counter import fold
 from popper.events import Event, EventType, Refutation, StrikeEvent, StrikeTarget
-from popper.store import EventStore, StoreViolation, event_from_record
+from popper.store import EventStore, StoreViolation, event_from_record, event_sort_key
 
 
 def sample_strike(session_id: str = "s1") -> StrikeEvent:
@@ -50,6 +50,34 @@ class RoundTripTest(unittest.TestCase):
         record["counter_delta"] = 99
         restored = event_from_record(record)
         self.assertEqual(restored.counter_delta, -1)
+
+    def test_equal_timestamps_have_a_total_cross_session_order(self) -> None:
+        at = "2026-01-01T00:00:00+00:00"
+        events = (
+            Event(
+                type=EventType.SESSION_START,
+                session_id="z-session",
+                event_id="z-0",
+                at=at,
+                seq=0,
+            ),
+            Event(
+                type=EventType.SESSION_START,
+                session_id="a-session",
+                event_id="a-1",
+                at=at,
+                seq=1,
+            ),
+            Event(
+                type=EventType.SESSION_START,
+                session_id="a-session",
+                event_id="a-0",
+                at=at,
+                seq=0,
+            ),
+        )
+        ordered = sorted(events, key=event_sort_key)
+        self.assertEqual([event.event_id for event in ordered], ["a-0", "a-1", "z-0"])
 
 
 class StoreTest(unittest.TestCase):

@@ -18,7 +18,7 @@ Popper는 코딩 에이전트가 취할 수 있는 구체적인 행동 두 가�
 
 > **한국어 우선 v1:** 세션 UI와 생성 규칙 문구는 한국어입니다.
 
-**v1.3.0 · Python 3.10–3.14 · MIT · 서드파티 Python 런타임 패키지 0개 · 런타임 LLM·텔레메트리·외부 네트워크 호출 0회**
+**v1.3.1 · Python 3.10–3.14 · MIT · 서드파티 Python 런타임 패키지 0개 · 런타임 LLM·텔레메트리·외부 네트워크 호출 0회**
 
 ## 제품 전체를 한 가지 예로 이해하기
 
@@ -85,7 +85,7 @@ macOS 또는 Linux:
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install \
-  https://github.com/brnyxx/popper/releases/download/v1.3.0/popper-1.3.0-py3-none-any.whl
+  https://github.com/brnyxx/popper/releases/download/v1.3.1/popper-1.3.1-py3-none-any.whl
 .venv/bin/popper doctor
 .venv/bin/popper open
 ```
@@ -95,7 +95,7 @@ Windows PowerShell:
 ```powershell
 py -3 -m venv .venv
 .venv\Scripts\python -m pip install `
-  https://github.com/brnyxx/popper/releases/download/v1.3.0/popper-1.3.0-py3-none-any.whl
+  https://github.com/brnyxx/popper/releases/download/v1.3.1/popper-1.3.1-py3-none-any.whl
 .venv\Scripts\popper doctor
 .venv\Scripts\popper open
 ```
@@ -111,16 +111,16 @@ popper status
 
 ## 체크섬을 검증해 Claude Code 안에 설치하기
 
-[v1.3.0 릴리스](../../releases/tag/v1.3.0)에서 `popper-plugin-1.3.0.zip`, `SHA256SUMS`, `verify_checksums.py`를 같은 디렉터리에 받은 뒤 압축을 풀기 전에 검증합니다.
+[v1.3.1 릴리스](../../releases/tag/v1.3.1)에서 `popper-plugin-1.3.1.zip`, `SHA256SUMS`, `verify_checksums.py`를 같은 디렉터리에 받은 뒤 압축을 풀기 전에 검증합니다.
 
 macOS 또는 Linux:
 
 ```bash
 python3 verify_checksums.py SHA256SUMS \
-  --only popper-plugin-1.3.0.zip verify_checksums.py
-DEST="$HOME/.local/share/popper-plugin-1.3.0"
+  --only popper-plugin-1.3.1.zip verify_checksums.py
+DEST="$HOME/.local/share/popper-plugin-1.3.1"
 test ! -e "$DEST" || { echo "destination already exists: $DEST" >&2; exit 1; }
-python3 -m zipfile -e popper-plugin-1.3.0.zip "$DEST"
+python3 -m zipfile -e popper-plugin-1.3.1.zip "$DEST"
 claude plugin marketplace add "$DEST"
 claude plugin install popper@popper-marketplace
 ```
@@ -129,10 +129,10 @@ Windows PowerShell:
 
 ```powershell
 py -3 verify_checksums.py SHA256SUMS `
-  --only popper-plugin-1.3.0.zip verify_checksums.py
-$Dest = Join-Path $env:LOCALAPPDATA "Popper\plugin-1.3.0"
+  --only popper-plugin-1.3.1.zip verify_checksums.py
+$Dest = Join-Path $env:LOCALAPPDATA "Popper\plugin-1.3.1"
 if (Test-Path $Dest) { throw "destination already exists: $Dest" }
-py -3 -m zipfile -e popper-plugin-1.3.0.zip $Dest
+py -3 -m zipfile -e popper-plugin-1.3.1.zip $Dest
 claude plugin marketplace add $Dest
 claude plugin install popper@popper-marketplace
 ```
@@ -221,14 +221,14 @@ popper export --format json > popper-rules.json
 
 ```bash
 python3 verify_checksums.py SHA256SUMS \
-  --only popper-plugin-1.3.0.zip verify_checksums.py
+  --only popper-plugin-1.3.1.zip verify_checksums.py
 ```
 
-이전 marketplace 설치를 v1.3.0으로 옮길 때는 새 버전 디렉터리에 풀고 다시 등록합니다.
+이전 marketplace 설치를 v1.3.1로 옮길 때는 새 버전 디렉터리에 풀고 다시 등록합니다.
 
 ```bash
-DEST="$HOME/.local/share/popper-plugin-1.3.0"
-python3 -m zipfile -e popper-plugin-1.3.0.zip "$DEST"
+DEST="$HOME/.local/share/popper-plugin-1.3.1"
+python3 -m zipfile -e popper-plugin-1.3.1.zip "$DEST"
 claude plugin marketplace remove popper-marketplace
 claude plugin marketplace add "$DEST"
 claude plugin update popper@popper-marketplace
@@ -245,7 +245,7 @@ Claude Code를 다시 시작하고 `/popper:popper doctor`를 통과한 뒤에�
 ```bash
 claude plugin uninstall popper@popper-marketplace
 claude plugin marketplace remove popper-marketplace
-rm -rf "$HOME/.local/share/popper-plugin-1.3.0"
+rm -rf "$HOME/.local/share/popper-plugin-1.3.1"
 ```
 
 `~/.claude/popper/`는 사용자 데이터이므로 의도적으로 남깁니다. 먼저 백업하고, 이벤트 이력과 생성 규칙을 정말 폐기하려는 경우에만 해당 디렉터리를 직접 삭제하세요.
