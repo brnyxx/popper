@@ -5,7 +5,11 @@ from __future__ import annotations
 import os
 import stat
 import tempfile
+import time
 from pathlib import Path
+
+WINDOWS_REPLACE_TIMEOUT_SECONDS = 5.0
+WINDOWS_REPLACE_RETRY_SECONDS = 0.01
 
 
 def _sync_directory(path: Path) -> None:
@@ -21,6 +25,18 @@ def _sync_directory(path: Path) -> None:
         pass
     finally:
         os.close(descriptor)
+
+
+def _replace(temporary: Path, target: Path) -> None:
+    deadline = time.monotonic() + WINDOWS_REPLACE_TIMEOUT_SECONDS
+    while True:
+        try:
+            os.replace(temporary, target)
+            return
+        except PermissionError:
+            if os.name != "nt" or time.monotonic() >= deadline:
+                raise
+            time.sleep(WINDOWS_REPLACE_RETRY_SECONDS)
 
 
 def atomic_write_bytes(target: Path | str, data: bytes) -> Path:
@@ -39,7 +55,7 @@ def atomic_write_bytes(target: Path | str, data: bytes) -> Path:
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        _replace(temporary, path)
         _sync_directory(path.parent)
     except BaseException:
         try:

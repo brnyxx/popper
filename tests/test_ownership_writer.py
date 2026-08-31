@@ -144,7 +144,8 @@ def test_permission_adds_exactly_one_line_and_is_idempotent(tmp_path: Path) -> N
     assert first.reason == IMPORT_ADDED
     after = claude_md.read_bytes()
     # 그 한 줄 외 어떤 바이트도 추가/변경되지 않는다
-    assert after == before + (first.line + "\n").encode("utf-8")
+    newline = b"\r\n" if b"\r\n" in before else b"\n"
+    assert after == before + first.line.encode("utf-8") + newline
 
     second = writer.ensure_import(grant(writer))
     assert second.changed is False
