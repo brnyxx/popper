@@ -77,6 +77,7 @@ from popper.fixtures import (
 from popper.recheck import DEFAULT_BUDGET, plan_recheck_session
 from popper.session import (
     PROFILE_PRODUCT,
+    PROFILE_RECHECK,
     PROFILE_VALIDATION,
     SessionSpec,
     fold_session,
@@ -100,9 +101,6 @@ logger = logging.getLogger(__name__)
 
 #: 콜드 오픈이 반드시 첫 순서에 세우는 대비 축.
 COLD_OPEN_AXIS = "autonomy"
-
-#: 4막 미니 재심 프로파일 - 봉인 슬롯 배치가 아니라 재심 예산이 캡이다.
-PROFILE_RECHECK = "recheck"
 
 #: 화면에 노출되는 축 이름 - UI 텍스트는 전부 한국어다.
 AXIS_LABELS: dict[str, str] = {
@@ -396,6 +394,7 @@ class ColdOpenSession:
         store: EventStore | None = None,
         land_dir: Path | str | None = None,
         history: Sequence[StrikeEvent | Event] = (),
+        resume_events: Sequence[StrikeEvent | Event] = (),
         recheck_manifest: Mapping[str, Any] | None = None,
         recheck_budget: int = DEFAULT_BUDGET,
         banner: str | None = None,
@@ -412,7 +411,44 @@ class ColdOpenSession:
         if pairs[0].axis != COLD_OPEN_AXIS:
             raise SchemaViolation(f"콜드 오픈 첫 페어의 축이 {COLD_OPEN_AXIS}가 아니다")
 
-        self._log = EventLog()
+        resumed = tuple(resume_events)
+        if resumed:
+            resumed_ids = {event.session_id for event in resumed}
+            if len(resumed_ids) != 1:
+                raise SchemaViolation("재개 이벤트는 한 세션에만 속해야 한다")
+            resumed_id = next(iter(resumed_ids))
+            if session_id is not None and session_id != resumed_id:
+                raise SchemaViolation("재개 session_id와 이벤트 session_id가 다르다")
+            session_id = resumed_id
+            opening_event = next(
+                (
+                    event
+                    for event in resumed
+                    if isinstance(event, Event)
+                    and event.type is EventType.SESSION_START
+                ),
+                None,
+            )
+            if opening_event is None:
+                raise SchemaViolation("재개 이벤트에 session_start가 없다")
+            resumed_profile = str(
+                opening_event.payload.get("profile")
+                or opening_event.payload.get("session_kind")
+                or ""
+            )
+            if resumed_profile != profile:
+                raise SchemaViolation(
+                    f"재개 프로파일 불일치: {resumed_profile!r} != {profile!r}"
+                )
+            if any(
+                isinstance(event, Event)
+                and event.type
+                in (EventType.SESSION_VALIDATED, EventType.SESSION_VOIDED)
+                for event in resumed
+            ):
+                raise SessionComplete("이미 종료된 세션은 재개할 수 없다")
+
+        self._log = EventLog(resumed)
         self._lock = RLock()
         self._session_id = session_id or uuid.uuid4().hex
         if profile == PROFILE_VALIDATION:
@@ -443,7 +479,14 @@ class ColdOpenSession:
         else:
             self._pairs = pairs
         self._by_id = {pair.pair_id: pair for pair in self._pairs}
-        self._last: str | None = None
+        self._last = next(
+            (
+                event.strike_target.value
+                for event in reversed(self._log.events)
+                if isinstance(event, StrikeEvent)
+            ),
+            None,
+        )
         self._store = store
         self._land_dir = Path(land_dir) if land_dir is not None else None
         self._history = tuple(history)
@@ -455,18 +498,35 @@ class ColdOpenSession:
         self._spec: SessionSpec | None
         self._recheck_axes: tuple[str, ...] | None
         if profile == PROFILE_RECHECK:
-            manifest = recheck_manifest if recheck_manifest is not None else {}
-            plan = plan_recheck_session(
-                manifest, self._session_id, budget=recheck_budget
-            )
             self._spec = None
-            self._slots_total = plan.budget
-            self._recheck_axes = tuple(
-                dict.fromkeys(target.axis for target in plan.targets)
-            )
-            if not plan.targets:
-                raise SchemaViolation("재심 대기 대상이 없다")
-            opening = plan.opening
+            if resumed:
+                opening = next(
+                    event
+                    for event in resumed
+                    if isinstance(event, Event)
+                    and event.type is EventType.SESSION_START
+                )
+                self._slots_total = int(
+                    opening.payload.get("recheck_budget", recheck_budget)
+                )
+                raw_axes = opening.payload.get("recheck_axes", ())
+                self._recheck_axes = tuple(
+                    str(axis) for axis in raw_axes if isinstance(axis, str)
+                )
+                if not self._recheck_axes:
+                    raise SchemaViolation("재개할 재심 축이 없다")
+            else:
+                manifest = recheck_manifest if recheck_manifest is not None else {}
+                plan = plan_recheck_session(
+                    manifest, self._session_id, budget=recheck_budget
+                )
+                self._slots_total = plan.budget
+                self._recheck_axes = tuple(
+                    dict.fromkeys(target.axis for target in plan.targets)
+                )
+                if not plan.targets:
+                    raise SchemaViolation("재심 대기 대상이 없다")
+                opening = plan.opening
         else:
             specs = load_session_specs()
             spec = specs.get(profile)
@@ -480,7 +540,8 @@ class ColdOpenSession:
                 session_id=self._session_id,
                 payload={"profile": profile},
             )
-        self._append(opening)
+        if not resumed:
+            self._append(opening)
         logger.debug(
             "세션 준비 완료: session=%s profile=%s 슬롯 %d개 페어 %d개",
             self._session_id,

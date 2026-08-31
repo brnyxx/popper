@@ -142,3 +142,17 @@ def target_lock(target: Path | str) -> ProcessFileLock:
     """소유 디렉토리 밖 단일 사용자 파일을 보호하는 형제 잠금."""
     path = Path(target).expanduser().resolve()
     return lock_for_path(path.with_name(f".{path.name}.popper.lock"))
+
+
+def session_runtime_lock(
+    base_dir: Path | str, session_id: str, *, timeout: float = 0.1
+) -> ProcessFileLock:
+    """동일 세션을 두 서버가 동시에 열지 못하게 하는 수명주기 잠금."""
+    base = Path(base_dir).expanduser().resolve()
+    safe_id = "".join(character for character in session_id if character.isalnum())
+    if not safe_id:
+        raise ValueError("session_id에서 안전한 잠금 이름을 만들 수 없다")
+    return ProcessFileLock(
+        base.parent / f".{base.name}.{safe_id}.runtime.lock",
+        timeout=timeout,
+    )

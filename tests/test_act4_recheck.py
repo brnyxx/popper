@@ -48,7 +48,7 @@ from popper.recheck import (
     refresh_last_review,
     revived_demotions,
 )
-from popper.session import PROFILE_PRODUCT
+from popper.session import PROFILE_PRODUCT, PROFILE_RECHECK
 
 SID = "sess-main"
 RID = "sess-recheck"
@@ -187,7 +187,9 @@ def test_mini_session_reuses_act1_pair_ui_schema(manifest: dict) -> None:
     assert isinstance(plan.opening, Event)
     assert plan.opening.type is EventType.SESSION_START
     assert plan.opening.payload["session_kind"] == "recheck"
-    assert plan.opening.payload["profile"] == PROFILE_PRODUCT
+    assert plan.opening.payload["profile"] == PROFILE_RECHECK
+    assert plan.opening.payload["recheck_budget"] == DEFAULT_BUDGET
+    assert plan.opening.payload["recheck_axes"]
     # 신규 UI 기계장치 없음 - recheck 전용 이벤트 타입은 존재하지 않는다.
     assert all("recheck" not in member.value for member in EventType)
 

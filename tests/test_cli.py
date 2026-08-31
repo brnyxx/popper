@@ -45,9 +45,17 @@ class ParserTest(unittest.TestCase):
         parser = build_parser()
         for argv in (
             ["open"],
+            ["resume"],
             ["validate"],
             ["recheck", "--budget", "6"],
             ["status"],
+            ["sessions"],
+            ["doctor"],
+            ["export", "--format", "json"],
+            ["data", "backup", "backup.zip"],
+            ["data", "inspect", "backup.zip"],
+            ["version"],
+            ["update"],
             ["land", "--acknowledge-mismatch"],
             ["enable", "--grant"],
             ["rollback"],

@@ -35,7 +35,7 @@ from popper.recovery import (
     RecoveryChannel,
     RecoveryState,
 )
-from popper.session import PROFILE_PRODUCT
+from popper.session import PROFILE_RECHECK
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +182,12 @@ def plan_recheck_session(
     opening = Event(
         type=EventType.SESSION_START,
         session_id=session_id,
-        payload={"session_kind": RECHECK_SESSION_KIND, "profile": PROFILE_PRODUCT},
+        payload={
+            "session_kind": RECHECK_SESSION_KIND,
+            "profile": PROFILE_RECHECK,
+            "recheck_budget": budget,
+            "recheck_axes": list(dict.fromkeys(target.axis for target in targets)),
+        },
     )
     logger.info(
         "재심 세션 계획: session=%s 대상 %d/%d건 예산 %d긋기",

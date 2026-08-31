@@ -11,7 +11,7 @@ import uuid
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 
 
 class SchemaViolation(ValueError):
@@ -270,8 +270,12 @@ class EventLog:
 
     __slots__ = ("_events",)
 
-    def __init__(self) -> None:
+    def __init__(
+        self, events: Iterable[StrikeEvent | Event] = ()
+    ) -> None:
         self._events: list[StrikeEvent | Event] = []
+        for event in events:
+            self.append(event)
 
     @property
     def events(self) -> tuple[StrikeEvent | Event, ...]:

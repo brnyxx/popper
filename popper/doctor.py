@@ -1,0 +1,198 @@
+"""외부 네트워크 없이 설치, 데이터, replay, 루프백 경계를 진단한다."""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import sys
+from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
+from typing import Any, Callable
+
+from popper.compiler import MANIFEST_JSON, verify_outputs
+from popper.fixtures import load_pack
+from popper.scoring import (
+    DEFAULT_GROUND_TRUTH_HASH_PATH,
+    DEFAULT_GROUND_TRUTH_PATH,
+    load_ground_truth,
+)
+from popper.session import load_session_specs
+from popper.sessions import summarize_sessions
+from popper.store import EventStore
+
+APP_VERSION_FALLBACK = "source"
+SUPPORTED_PYTHON_MIN = (3, 10)
+SUPPORTED_PYTHON_MAX = (3, 14)
+
+
+@dataclass(frozen=True, slots=True)
+class DoctorCheck:
+    name: str
+    status: str
+    evidence: str
+    remediation: str | None = None
+
+    @property
+    def healthy(self) -> bool:
+        return self.status in {"ok", "skip"}
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "check": self.name,
+            "status": self.status,
+            "evidence": self.evidence,
+            "remediation": self.remediation,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class DoctorReport:
+    version: str
+    base_dir: str
+    checks: tuple[DoctorCheck, ...]
+
+    @property
+    def healthy(self) -> bool:
+        return all(check.healthy for check in self.checks)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "artifact": "popper_doctor",
+            "version": self.version,
+            "base_dir": self.base_dir,
+            "healthy": self.healthy,
+            "checks": [check.to_dict() for check in self.checks],
+        }
+
+
+def app_version() -> str:
+    try:
+        return version("popper")
+    except PackageNotFoundError:
+        return APP_VERSION_FALLBACK
+
+
+def _capture(
+    name: str,
+    action: Callable[[], str],
+    remediation: str,
+) -> DoctorCheck:
+    try:
+        return DoctorCheck(name=name, status="ok", evidence=action())
+    except Exception as exc:
+        return DoctorCheck(
+            name=name,
+            status="error",
+            evidence=f"{type(exc).__name__}: {exc}",
+            remediation=remediation,
+        )
+
+
+def _writable_evidence(base_dir: Path) -> str:
+    candidate = base_dir
+    while not candidate.exists() and candidate != candidate.parent:
+        candidate = candidate.parent
+    if not candidate.exists() or not candidate.is_dir():
+        raise OSError(f"쓸 수 있는 상위 디렉토리를 찾지 못했다: {base_dir}")
+    if not os.access(candidate, os.W_OK | os.X_OK):
+        raise PermissionError(f"쓰기 권한이 없다: {candidate}")
+    return f"writable parent={candidate}"
+
+
+def _loopback_evidence() -> str:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        server.bind(("127.0.0.1", 0))
+        return f"bind=127.0.0.1:{server.getsockname()[1]}"
+
+
+def _output_evidence(base_dir: Path) -> str:
+    manifest = base_dir / MANIFEST_JSON
+    if not manifest.exists():
+        return "no landed manifest"
+    mismatches = verify_outputs(base_dir)
+    if mismatches:
+        raise ValueError(json.dumps(mismatches, ensure_ascii=False))
+    return "content hashes match"
+
+
+def run_doctor(base_dir: Path | str) -> DoctorReport:
+    base = Path(base_dir).expanduser().resolve()
+    current = sys.version_info[:2]
+    supported = SUPPORTED_PYTHON_MIN <= current <= SUPPORTED_PYTHON_MAX
+    python_check = DoctorCheck(
+        name="python",
+        status="ok" if supported else "error",
+        evidence=f"{sys.version.split()[0]} ({sys.platform})",
+        remediation=None
+        if supported
+        else "Python 3.10-3.14 중 하나로 Popper를 다시 설치해라.",
+    )
+    checks = [python_check]
+    checks.append(
+        _capture(
+            "package_resources",
+            lambda: (
+                f"catalog={load_pack().catalog_version}, "
+                f"profiles={','.join(sorted(load_session_specs()))}"
+            ),
+            "wheel/plugin을 다시 설치하고 popper doctor를 재실행해라.",
+        )
+    )
+    checks.append(
+        _capture(
+            "ground_truth_seal",
+            lambda: load_ground_truth(
+                DEFAULT_GROUND_TRUTH_PATH,
+                expected_file_hash=DEFAULT_GROUND_TRUTH_HASH_PATH.read_text(
+                    encoding="utf-8"
+                ).strip(),
+            ).file_hash,
+            "봉인 정답지가 포함된 공식 배포물을 다시 설치해라.",
+        )
+    )
+    checks.append(
+        _capture(
+            "data_directory",
+            lambda: _writable_evidence(base),
+            "--base-dir에 쓰기 가능한 경로를 지정하거나 권한을 복구해라.",
+        )
+    )
+
+    store = EventStore(base)
+    replayed: tuple[Any, ...] = ()
+    try:
+        replayed = store.load_all()
+        summaries = summarize_sessions(replayed)
+        checks.append(
+            DoctorCheck(
+                name="event_replay",
+                status="ok",
+                evidence=f"events={len(replayed)}, sessions={len(summaries)}",
+            )
+        )
+    except Exception as exc:
+        checks.append(
+            DoctorCheck(
+                name="event_replay",
+                status="error",
+                evidence=f"{type(exc).__name__}: {exc}",
+                remediation="sessions/의 보고된 손상 줄을 확인하고 백업에서 복구해라.",
+            )
+        )
+    checks.append(
+        _capture(
+            "landed_outputs",
+            lambda: _output_evidence(base),
+            "popper land로 재검증하되 수기 편집은 먼저 별도 보존해라.",
+        )
+    )
+    checks.append(
+        _capture(
+            "loopback_server",
+            _loopback_evidence,
+            "로컬 방화벽 또는 루프백 네트워크 설정을 확인해라.",
+        )
+    )
+    return DoctorReport(version=app_version(), base_dir=str(base), checks=tuple(checks))

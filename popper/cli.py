@@ -26,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from popper.backup import create_backup, inspect_backup
 from popper.compiler import (
     MANIFEST_JSON,
     CompiledRule as CompilerRule,
@@ -43,19 +44,28 @@ from popper.conflict import (
     ManualRule,
     detect_conflicts,
 )
-from popper.events import Event, EventType
+from popper.events import Event, EventType, SchemaViolation
+from popper.fixtures import load_pack
+from popper.doctor import app_version, run_doctor
+from popper.exporter import EXPORT_FORMATS, render_export, write_export
 from popper.judgment import acknowledge, emit_condition_met, fold_judgment
-from popper.locking import base_lock
+from popper.locking import LockTimeout, base_lock, session_runtime_lock
 from popper.recheck import (
     DEFAULT_BUDGET,
     MANUAL_COMMAND,
     RecheckViolation,
     check_due,
 )
-from popper.session import DEFAULT_PREREG_PATH, PROFILE_PRODUCT, PROFILE_VALIDATION
+from popper.session import (
+    DEFAULT_PREREG_PATH,
+    PROFILE_PRODUCT,
+    PROFILE_RECHECK,
+    PROFILE_VALIDATION,
+)
+from popper.sessions import latest_resumable, summarize_sessions
 from popper.store import EventStore, StoreViolation
 from popper.web.server import EPHEMERAL_PORT, HOST, build_server
-from popper.web.state import PROFILE_RECHECK, ColdOpenSession
+from popper.web.state import ColdOpenSession, SessionComplete
 from popper.writer import OwnedWriter
 
 logger = logging.getLogger("popper")
@@ -89,6 +99,53 @@ def _banner_text(manifest: Mapping[str, Any] | None) -> str | None:
     if banner.text is None:
         return None
     return f"{banner.text} - {MANUAL_COMMAND}로 재심에 들어갈 수 있다"
+
+
+def _activation_state(base_dir: Path) -> dict[str, str | None]:
+    writer = OwnedWriter(base_dir=base_dir)
+    expected = writer.import_line()
+    target = writer.claude_md_path
+    if not (base_dir / "POPPER.md").is_file():
+        return {
+            "status": "inactive",
+            "path": str(target),
+            "expected_import": expected,
+            "remediation": "popper open으로 세션을 먼저 완주해라",
+        }
+    if not target.is_file():
+        return {
+            "status": "inactive",
+            "path": str(target),
+            "expected_import": expected,
+            "remediation": f"{target}를 만든 뒤 popper enable --grant를 실행해라",
+        }
+    try:
+        lines = target.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as exc:
+        return {
+            "status": "import-drift",
+            "path": str(target),
+            "expected_import": expected,
+            "remediation": f"CLAUDE.md를 읽지 못했다: {exc}",
+        }
+    if expected in lines:
+        return {
+            "status": "active",
+            "path": str(target),
+            "expected_import": expected,
+            "remediation": None,
+        }
+    stale = [line for line in lines if line.startswith("@") and "POPPER.md" in line]
+    return {
+        "status": "import-drift" if stale else "inactive",
+        "path": str(target),
+        "expected_import": expected,
+        "remediation": (
+            "popper rollback 후 popper enable --grant를 실행해라"
+            if stale
+            else "popper enable --grant를 실행해라"
+        ),
+    }
 
 
 def _load_consent(base_dir: Path) -> ConsentLedger:
@@ -301,25 +358,85 @@ def _latest_validation_end(
 
 
 def _serve(session: ColdOpenSession, args: argparse.Namespace) -> int:
-    server = build_server(session=session, host=args.host, port=args.port)
-    logger.info("긋기 화면: %s", server.url)
-    logger.info("세션: %s (%s) - 중단은 Ctrl+C", session.session_id, session.profile)
-    if not args.no_browser:
-        webbrowser.open(server.url)
     try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        logger.info("서버를 닫는다")
-    finally:
-        server.shutdown()
-        server.server_close()
+        with session_runtime_lock(args.base_dir, session.session_id):
+            server = build_server(session=session, host=args.host, port=args.port)
+            logger.info("긋기 화면: %s", server.url)
+            logger.info(
+                "세션: %s (%s) - 중단은 Ctrl+C", session.session_id, session.profile
+            )
+            if not args.no_browser:
+                webbrowser.open(server.url)
+            try:
+                server.serve_forever()
+            except KeyboardInterrupt:
+                logger.info("서버를 닫는다")
+            finally:
+                server.shutdown()
+                server.server_close()
+    except LockTimeout:
+        logger.error("세션 %s은 이미 다른 Popper 프로세스에서 열려 있다", session.session_id)
+        return 1
     return 0
+
+
+def _resumed_session(
+    base: Path,
+    store: EventStore,
+    session_id: str,
+    args: argparse.Namespace,
+) -> ColdOpenSession:
+    events = store.load_session(session_id)
+    summary = latest_resumable(events, session_id)
+    if summary is None:
+        raise ValueError(f"재개 가능한 세션이 아니다: {session_id}")
+    return ColdOpenSession(
+        repo_root=args.repo,
+        session_id=session_id,
+        profile=summary.profile,
+        store=store,
+        land_dir=base,
+        history=store.load_completed(),
+        resume_events=events,
+        banner=_banner_text(_load_manifest(base)),
+        conflicts_for=_conflicts_for(base),
+    )
 
 
 def cmd_open(args: argparse.Namespace) -> int:
     base = Path(args.base_dir)
     manifest = _load_manifest(base)
     store = EventStore(base)
+    if not args.new:
+        candidates = [
+            summary
+            for summary in summarize_sessions(store.load_all())
+            if summary.resumable and summary.profile == PROFILE_PRODUCT
+        ]
+        if len(candidates) > 1:
+            logger.error("미완료 일반 세션이 %d건 있다", len(candidates))
+            for candidate in candidates:
+                logger.error(
+                    "  %s  %d/%d  %s",
+                    candidate.session_id,
+                    candidate.slots_used,
+                    candidate.slots_total,
+                    candidate.updated_at,
+                )
+            logger.error("popper resume <session-id> 또는 popper open --new를 사용해라")
+            return 1
+        if candidates:
+            candidate = candidates[0]
+            logger.info(
+                "미완료 세션 계속: %s (%d/%d)",
+                candidate.session_id,
+                candidate.slots_used,
+                candidate.slots_total,
+            )
+            return _serve(
+                _resumed_session(base, store, candidate.session_id, args),
+                args,
+            )
     session = ColdOpenSession(
         repo_root=args.repo,
         profile=PROFILE_PRODUCT,
@@ -328,6 +445,41 @@ def cmd_open(args: argparse.Namespace) -> int:
         history=store.load_completed(),
         banner=_banner_text(manifest),
         conflicts_for=_conflicts_for(base),
+    )
+    return _serve(session, args)
+
+
+def cmd_resume(args: argparse.Namespace) -> int:
+    base = Path(args.base_dir)
+    store = EventStore(base)
+    all_events = store.load_all()
+    resumable = [
+        summary
+        for summary in summarize_sessions(all_events)
+        if summary.resumable
+        and (args.session_id is None or summary.session_id == args.session_id)
+    ]
+    if args.session_id is None and len(resumable) > 1:
+        logger.error("재개 가능한 세션이 %d건 있다 - session-id를 지정해라", len(resumable))
+        for summary in resumable:
+            logger.error("  %s  %s  %d/%d", summary.session_id, summary.profile, summary.slots_used, summary.slots_total)
+        return 1
+    candidate = resumable[0] if resumable else None
+    if candidate is None:
+        target = f" {args.session_id}" if args.session_id else ""
+        logger.error("재개 가능한 세션이 없다%s", target)
+        return 1
+    try:
+        session = _resumed_session(base, store, candidate.session_id, args)
+    except (ValueError, SchemaViolation, SessionComplete) as exc:
+        logger.error("세션 재개 실패 - %s", exc)
+        return 1
+    logger.info(
+        "세션 재개: %s (%s %d/%d)",
+        candidate.session_id,
+        candidate.profile,
+        candidate.slots_used,
+        candidate.slots_total,
     )
     return _serve(session, args)
 
@@ -393,6 +545,7 @@ def cmd_recheck(args: argparse.Namespace) -> int:
 def cmd_status(args: argparse.Namespace) -> int:
     base = Path(args.base_dir)
     manifest = _load_manifest(base)
+    activation = _activation_state(base)
     if manifest is None:
         logger.info("착지된 산출물이 없다 - popper open으로 첫 세션을 완주해라")
     else:
@@ -408,8 +561,40 @@ def cmd_status(args: argparse.Namespace) -> int:
 
     store = EventStore(base)
     events = store.load_all()
-    logger.info("저장된 세션: %d개, 이벤트 %d건", len(store.session_ids()), len(events))
+    summaries = summarize_sessions(events)
     state = fold_judgment(events)
+    if args.json_output:
+        print(
+            json.dumps(
+                {
+                    "artifact": "popper_status",
+                    "version": app_version(),
+                    "base_dir": str(base.expanduser().resolve()),
+                    "manifest": manifest,
+                    "activation": activation,
+                    "sessions": [summary.to_dict() for summary in summaries],
+                    "judgment": {
+                        "valid_sessions": state.valid_sessions,
+                        "discriminative_instances": state.discriminative_instances,
+                        "correct_restorations": state.correct_restorations,
+                        "mis_restorations": state.mis_restorations,
+                        "condition_met": state.condition_met,
+                        "core_refutation_confirmed": state.core_refutation_confirmed,
+                    },
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+    logger.info("활성화: %s", activation["status"])
+    if activation["remediation"]:
+        logger.info("활성화 다음 행동: %s", activation["remediation"])
+    logger.info("저장된 세션: %d개, 이벤트 %d건", len(store.session_ids()), len(events))
+    in_progress = [summary for summary in summaries if summary.resumable]
+    if in_progress:
+        logger.info("재개 가능: %d건 (popper resume)", len(in_progress))
     logger.info(
         "자기반증 판정: 유효 검증 세션 %d, 판별 인스턴스 %d, 정복원 %d, 오복원 %d",
         state.valid_sessions,
@@ -505,6 +690,152 @@ def cmd_acknowledge(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sessions(args: argparse.Namespace) -> int:
+    base = Path(args.base_dir)
+    store = EventStore(base)
+    if args.session_id:
+        events = store.load_session(args.session_id)
+        summaries = summarize_sessions(events)
+        if not summaries:
+            logger.error("세션을 찾지 못했다: %s", args.session_id)
+            return 1
+        payload = {
+            "summary": summaries[0].to_dict(),
+            "events": [
+                event.to_dict()
+                for event in (events[-args.events :] if args.events else ())
+            ],
+        }
+        if args.json_output:
+            print(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
+        else:
+            summary = summaries[0]
+            logger.info(
+                "%s  %s  %s  %d/%d  last=%s",
+                summary.session_id,
+                summary.profile,
+                summary.status,
+                summary.slots_used,
+                summary.slots_total,
+                summary.updated_at,
+            )
+            for event in (events[-args.events :] if args.events else ()):
+                logger.info(
+                    "  %s  %s  %s",
+                    event.at,
+                    event.type.value,
+                    event.event_id,
+                )
+        return 0
+
+    summaries = summarize_sessions(store.load_all(), limit=args.limit)
+    if args.json_output:
+        print(
+            json.dumps(
+                {
+                    "artifact": "popper_sessions",
+                    "sessions": [summary.to_dict() for summary in summaries],
+                },
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+        )
+        return 0
+    if not summaries:
+        logger.info("저장된 사용자 세션이 없다")
+        return 0
+    for summary in summaries:
+        marker = "*" if summary.resumable else " "
+        logger.info(
+            "%s %s  %-10s %-11s %2d/%-2d  %s",
+            marker,
+            summary.session_id,
+            summary.profile,
+            summary.status,
+            summary.slots_used,
+            summary.slots_total,
+            summary.updated_at,
+        )
+    if any(summary.resumable for summary in summaries):
+        logger.info("* popper resume [session-id]로 계속할 수 있다")
+    return 0
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    report = run_doctor(args.base_dir)
+    if args.json_output:
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        logger.info("Popper %s doctor - %s", report.version, report.base_dir)
+        for check in report.checks:
+            marker = "OK" if check.healthy else "ERROR"
+            logger.info("[%s] %s - %s", marker, check.name, check.evidence)
+            if check.remediation:
+                logger.info("       복구: %s", check.remediation)
+    return 0 if report.healthy else 1
+
+
+def cmd_export(args: argparse.Namespace) -> int:
+    store = EventStore(Path(args.base_dir))
+    events = store.load_completed()
+    if not events:
+        logger.error("내보낼 완료 세션이 없다")
+        return 1
+    body = render_export(events, args.format)
+    if args.output is None:
+        print(body, end="")
+    else:
+        target = write_export(args.output, body)
+        logger.info("%s 형식 내보내기: %s", args.format, target)
+    return 0
+
+
+def cmd_data_backup(args: argparse.Namespace) -> int:
+    result = create_backup(args.base_dir, args.output)
+    logger.info(
+        "백업 완료: %s (파일 %d, 세션 %d)",
+        result.path,
+        result.file_count,
+        result.session_count,
+    )
+    logger.info("체크섬: %s", result.checksum_path)
+    return 0
+
+
+def cmd_data_inspect(args: argparse.Namespace) -> int:
+    report = inspect_backup(args.path)
+    if args.json_output:
+        print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2, sort_keys=True))
+    else:
+        logger.info("백업: %s", report.path)
+        logger.info(
+            "상태=%s schema=%d files=%d sessions=%d latest=%s",
+            "healthy" if report.healthy else "corrupt",
+            report.schema_version,
+            report.file_count,
+            report.session_count,
+            report.latest_session_at,
+        )
+        for error in report.errors:
+            logger.error("  %s", error)
+    return 0 if report.healthy else 1
+
+
+def cmd_version(args: argparse.Namespace) -> int:
+    pack = load_pack()
+    print(f"popper {app_version()} (catalog {pack.catalog_version}, backup schema 1)")
+    return 0
+
+
+def cmd_update(args: argparse.Namespace) -> int:
+    logger.info("Popper는 자동 네트워크 확인이나 자동 업그레이드를 하지 않는다.")
+    logger.info("uv:   uv tool upgrade popper")
+    logger.info("pipx: pipx upgrade popper")
+    logger.info("wheel/plugin: 새 공식 릴리스를 설치한 뒤 popper doctor를 실행해라")
+    return 0
+
+
 # ------------------------------------------------------------------- 파서
 
 
@@ -540,7 +871,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_open = sub.add_parser("open", help="일반 세션을 연다 (15긋기, 완주 시 착지)")
     _add_serve_common(p_open)
+    p_open.add_argument(
+        "--new",
+        action="store_true",
+        help="미완료 일반 세션이 있어도 새 세션을 연다",
+    )
     p_open.set_defaults(func=cmd_open)
+
+    p_resume = sub.add_parser("resume", help="마지막 또는 지정한 미완료 세션을 재개")
+    _add_serve_common(p_resume)
+    p_resume.add_argument("session_id", nargs="?", help="재개할 session_id")
+    p_resume.set_defaults(func=cmd_resume)
 
     p_validate = sub.add_parser(
         "validate", help="검증 세션을 연다 (판별 13 + 미러 프로브 2)"
@@ -557,7 +898,44 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_status = sub.add_parser("status", help="착지/재심/자기반증 판정 요약")
     _add_common(p_status)
+    p_status.add_argument("--json", dest="json_output", action="store_true")
     p_status.set_defaults(func=cmd_status)
+
+    p_sessions = sub.add_parser("sessions", help="최근 세션 목록 또는 상세 이벤트")
+    _add_common(p_sessions)
+    p_sessions.add_argument("session_id", nargs="?", help="상세 조회할 session_id")
+    p_sessions.add_argument("--limit", type=int, default=10, help="목록 최대 건수")
+    p_sessions.add_argument("--events", type=int, default=10, help="상세 최근 이벤트 건수")
+    p_sessions.add_argument("--json", dest="json_output", action="store_true")
+    p_sessions.set_defaults(func=cmd_sessions)
+
+    p_doctor = sub.add_parser("doctor", help="설치와 로컬 데이터 무결성 진단")
+    _add_common(p_doctor)
+    p_doctor.add_argument("--json", dest="json_output", action="store_true")
+    p_doctor.set_defaults(func=cmd_doctor)
+
+    p_export = sub.add_parser("export", help="수렴 규칙을 에이전트 중립 형식으로 내보냄")
+    _add_common(p_export)
+    p_export.add_argument("--format", choices=EXPORT_FORMATS, default="markdown")
+    p_export.add_argument("--output", type=Path, help="생략하면 stdout")
+    p_export.set_defaults(func=cmd_export)
+
+    p_data = sub.add_parser("data", help="소유 데이터 백업과 읽기 전용 검사")
+    data_sub = p_data.add_subparsers(dest="data_command", required=True)
+    p_backup = data_sub.add_parser("backup", help="원자 ZIP snapshot 생성")
+    _add_common(p_backup)
+    p_backup.add_argument("output", type=Path, help="소유 디렉토리 밖 .zip 경로")
+    p_backup.set_defaults(func=cmd_data_backup)
+    p_inspect = data_sub.add_parser("inspect", help="백업 무결성을 추출 없이 검사")
+    p_inspect.add_argument("path", type=Path)
+    p_inspect.add_argument("--json", dest="json_output", action="store_true")
+    p_inspect.set_defaults(func=cmd_data_inspect)
+
+    p_version = sub.add_parser("version", help="앱/카탈로그/백업 schema 버전")
+    p_version.set_defaults(func=cmd_version)
+
+    p_update = sub.add_parser("update", help="설치 방식별 명시적 업그레이드 명령 안내")
+    p_update.set_defaults(func=cmd_update)
 
     p_land = sub.add_parser("land", help="저장된 스트림에서 산출물 재착지")
     _add_common(p_land)

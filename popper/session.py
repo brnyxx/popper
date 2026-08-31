@@ -41,6 +41,7 @@ class SessionViolation(ValueError):
 
 PROFILE_PRODUCT = "product"
 PROFILE_VALIDATION = "validation"
+PROFILE_RECHECK = "recheck"
 
 #: probe_result의 허용 결과값 - 출처: 봉인 문서 probe_selection_rule.properties.
 PROBE_RESULT_DOMAIN: frozenset[str] = frozenset({"flip", "consistent"})
