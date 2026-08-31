@@ -31,13 +31,13 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from math import prod
 from types import MappingProxyType
 from typing import Any, Iterable, Mapping, Sequence
 
-from popper.events import Event, EventType, StrikeEvent, StrikeTarget
+from popper.events import Event, EventType, StrikeEvent
 
 logger = logging.getLogger(__name__)
 

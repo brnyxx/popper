@@ -37,6 +37,7 @@
       <span>{{wordmark}}</span>
     </a>
     <nav class="primary-navigation" aria-label="{{primary_navigation_label}}">
+      <a href="#outcome">{{nav_outcome}}</a>
       <a href="#mechanism">{{nav_mechanism}}</a>
       <a href="#start">{{nav_start}}</a>
       <a href="#boundaries">{{nav_boundaries}}</a>
@@ -57,13 +58,25 @@
           <h1 id="hero-title">{{hero_title}}</h1>
           <p class="hero-body">{{hero_body}}</p>
           <p class="proof-line">{{proof_line}}</p>
+          <p class="first-screen-notice">{{first_screen_notice}}</p>
           <div class="actions">
-            <a class="button" href="#mechanism">{{hero_mechanism_cta}}</a>
+            <a class="button" href="#outcome">{{hero_mechanism_cta}}</a>
             <a class="button button-secondary" href="{{repository_releases_url}}">{{hero_releases_cta}}</a>
           </div>
         </div>
-        <img class="hero-poster" src="{{asset_prefix}}assets/hero.svg"
-             alt="{{hero_image_alt}}" width="1200" height="420">
+        <div class="hero-story">
+          <p class="sr-only">{{storyboard_accessible}}</p>
+          <div class="storyboard" aria-hidden="true">
+            <div class="story-step story-input"><span class="story-label">{{story_input_label}}</span><strong>{{story_input}}</strong></div>
+            <div class="story-pair">
+              <div class="story-step story-falsified"><span class="story-label">{{story_behavior_label}}</span><del>{{story_wrong}}</del><span class="strike-line"></span></div>
+              <div class="story-step story-survivor"><span class="story-label">{{story_behavior_label}}</span><strong>{{story_survivor}}</strong></div>
+            </div>
+            <div class="story-step story-rule"><span class="story-label">{{story_rule_label}}</span><strong>{{story_rule}}</strong></div>
+            <div class="story-step story-next"><span class="story-label">{{story_next_label}}</span><strong>{{story_next}}</strong></div>
+          </div>
+          <p class="sr-only">{{storyboard_followup}}</p>
+        </div>
       </div>
       <ul class="trust-strip" aria-label="{{trust_label}}">
         <li>v{{version}}</li>
@@ -77,6 +90,23 @@
         <img src="{{asset_prefix}}assets/demo.gif" alt="{{demo_alt}}"
              width="960" height="608" loading="lazy">
       </details>
+    </section>
+
+    <section id="outcome" aria-labelledby="outcome-title">
+      <p class="eyebrow">{{outcome_label}}</p>
+      <h2 id="outcome-title">{{outcome_title}}</h2>
+      <p class="section-intro">{{outcome_intro}}</p>
+      <div class="outcome-pair">
+        <article><h3>{{outcome_before_title}}</h3><p>{{outcome_before}}</p></article>
+        <article><h3>{{outcome_after_title}}</h3><p>{{outcome_after}}</p></article>
+      </div>
+      <div class="files-grid">
+        <article><h3>POPPER.md</h3><p>{{outcome_popper}}</p></article>
+        <article><h3>manifest.json</h3><p>{{outcome_manifest}}</p></article>
+        <article><h3>settings.popper.json</h3><p>{{outcome_settings}}</p></article>
+      </div>
+      <p class="activation-note">{{outcome_activation}}</p>
+      <p class="axes-note">{{outcome_axes}}</p>
     </section>
 
     <section id="mechanism" aria-labelledby="mechanism-title">
@@ -103,11 +133,20 @@
     <section id="start" aria-labelledby="start-title">
       <p class="eyebrow">{{start_label}}</p>
       <h2 id="start-title">{{start_title}}</h2>
-      <ol class="steps">
-        <li><h3>{{step_one_title}}</h3><p>{{step_one_body}}</p><div class="commands"><code>python3 verify_checksums.py SHA256SUMS --only popper-plugin-{{version}}.zip verify_checksums.py</code><code>test ! -e "$HOME/.local/share/popper-plugin-{{version}}"</code><code>python3 -m zipfile -e popper-plugin-{{version}}.zip "$HOME/.local/share/popper-plugin-{{version}}"</code></div></li>
-        <li><h3>{{step_two_title}}</h3><p>{{step_two_body}}</p><div class="commands"><code>claude plugin marketplace add "$HOME/.local/share/popper-plugin-{{version}}"</code><code>claude plugin install popper@popper-marketplace</code></div></li>
-        <li><h3>{{step_three_title}}</h3><p>{{step_three_body}}</p><div class="commands"><code>{{open_command}}</code><code>{{enable_command}}</code><code>{{status_command}}</code></div></li>
-      </ol>
+      <div class="quickstart">
+        <h3>{{quickstart_title}}</h3>
+        <p>{{quickstart_body}}</p>
+        <div class="commands"><code>python3 -m venv .venv</code><code>.venv/bin/python -m pip install {{repository_url}}/releases/download/v{{version}}/popper-{{version}}-py3-none-any.whl</code><code>.venv/bin/popper doctor</code><code>.venv/bin/popper open</code></div>
+        <p>{{quickstart_note}}</p>
+      </div>
+      <details class="verified-install">
+        <summary>{{plugin_install_summary}}</summary>
+        <ol class="steps">
+          <li><h3>{{step_one_title}}</h3><p>{{step_one_body}}</p><div class="commands"><code>python3 verify_checksums.py SHA256SUMS --only popper-plugin-{{version}}.zip verify_checksums.py</code><code>test ! -e "$HOME/.local/share/popper-plugin-{{version}}"</code><code>python3 -m zipfile -e popper-plugin-{{version}}.zip "$HOME/.local/share/popper-plugin-{{version}}"</code></div></li>
+          <li><h3>{{step_two_title}}</h3><p>{{step_two_body}}</p><div class="commands"><code>claude plugin marketplace add "$HOME/.local/share/popper-plugin-{{version}}"</code><code>claude plugin install popper@popper-marketplace</code></div></li>
+          <li><h3>{{step_three_title}}</h3><p>{{step_three_body}}</p><div class="commands"><code>{{open_command}}</code><code>{{enable_command}}</code><code>{{status_command}}</code></div></li>
+        </ol>
+      </details>
     </section>
 
     <section id="boundaries" aria-labelledby="boundaries-title">
@@ -118,6 +157,7 @@
         <article><h3>{{boundary_runtime_title}}</h3><p>{{boundary_runtime_body}}</p></article>
         <article><h3>{{boundary_replay_title}}</h3><p>{{boundary_replay_body}}</p></article>
         <article><h3>{{boundary_activation_title}}</h3><p>{{boundary_activation_body}}</p></article>
+        <article><h3>{{boundary_recheck_title}}</h3><p>{{boundary_recheck_body}}</p></article>
       </div>
     </section>
 

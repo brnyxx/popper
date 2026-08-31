@@ -50,16 +50,20 @@ def test_pages_bilingual_proof_navigation_and_assets(page, tmp_path: Path) -> No
     with _serve(output) as url:
         page.goto(url, wait_until="load")
 
-        assert page.title() == "Popper — preference by elimination"
+        assert page.title() == "Popper — local CLAUDE.md behavior compiler"
         assert page.locator("html").get_attribute("lang") == "en"
         assert (
             page.get_by_role(
-                "heading", name="Don't answer setup questions. Strike the wrong side."
+                "heading", name="Cross out the agent behavior you never want again."
             ).count()
             == 1
         )
         assert page.locator("script").count() == 0
-        assert page.locator("del").inner_text().startswith("Before fixing pagination")
+        assert (
+            page.locator(".transcript del")
+            .inner_text()
+            .startswith("Before fixing pagination")
+        )
         assert (
             page.get_by_text("6,561 (3⁸; 8 axes, 3 values each)", exact=True).count()
             == 1
@@ -75,8 +79,22 @@ def test_pages_bilingual_proof_navigation_and_assets(page, tmp_path: Path) -> No
             ).count()
             == 1
         )
-        assert page.locator(".hero-poster").evaluate(
-            "image => image.complete && image.naturalWidth === 1200"
+        assert page.locator(".storyboard").count() == 1
+        assert (
+            page.locator(".story-next")
+            .inner_text()
+            .endswith("Fixed. Tests pass. Here is what changed.")
+        )
+        animation_timings = page.locator(".storyboard").evaluate(
+            """element => element.getAnimations({ subtree: true }).map(animation => {
+              const timing = animation.effect.getTiming();
+              return { duration: timing.duration, iterations: timing.iterations };
+            })"""
+        )
+        assert len(animation_timings) == 4
+        assert all(
+            timing == {"duration": 4800, "iterations": 1}
+            for timing in animation_timings
         )
 
         page.keyboard.press("Tab")
@@ -87,8 +105,8 @@ def test_pages_bilingual_proof_navigation_and_assets(page, tmp_path: Path) -> No
             "element => ({ width: getComputedStyle(element).outlineWidth, style: getComputedStyle(element).outlineStyle })"
         )
         assert focus_style == {"width": "3px", "style": "solid"}
-        page.get_by_role("link", name="See the mechanism").click()
-        assert page.url.endswith("#mechanism")
+        page.get_by_role("link", name="See the before and after").click()
+        assert page.url.endswith("#outcome")
 
         disclosure = page.locator(".demo-disclosure")
         disclosure.locator("summary").click()
@@ -98,11 +116,12 @@ def test_pages_bilingual_proof_navigation_and_assets(page, tmp_path: Path) -> No
         )
 
         page.get_by_role("link", name="KO").first.click()
-        assert page.title() == "Popper — 소거로 찾는 선호"
+        assert page.title() == "Popper — 로컬 CLAUDE.md 행동 컴파일러"
         assert page.locator("html").get_attribute("lang") == "ko"
         assert (
             page.get_by_role(
-                "heading", name="설정 질문에 답하지 마세요. 틀린 쪽을 그으세요."
+                "heading",
+                name="다시는 보고 싶지 않은 에이전트 행동에 빨간 줄을 그으세요.",
             ).count()
             == 1
         )
@@ -134,6 +153,12 @@ def test_pages_mobile_dark_reduced_motion_has_no_overflow(page, tmp_path: Path) 
         )
         assert page.locator("html").evaluate(
             "element => getComputedStyle(element).scrollBehavior === 'auto'"
+        )
+        assert page.locator(".story-next").evaluate(
+            "element => getComputedStyle(element).opacity === '1'"
+        )
+        assert page.locator(".strike-line").evaluate(
+            "element => getComputedStyle(element).transform === 'matrix(1, 0, 0, 1, 0, 0)'"
         )
         for link in page.locator("header a").all():
             assert link.evaluate(

@@ -1,5 +1,5 @@
 ---
-description: 반증(긋기)만으로 Claude Code 설정을 수렴시키고 명시적으로 활성화·롤백한다. 설정 인터뷰/질문 대신 대비 페어 트랜스크립트를 긋는다. 사용자가 "popper", "긋기 세션", "설정 수렴", "재심(recheck)", "popper 활성화/롤백"을 요청할 때 사용.
+description: 두 Claude Code 행동 중 틀린 쪽을 그어 로컬 CLAUDE.md 규칙으로 컴파일하고 명시적으로 활성화·롤백한다. 설정 인터뷰 대신 A/B 행동을 비교한다. 사용자가 "popper", "행동 규칙 컴파일", "긋기 세션", "재심(recheck)", "popper 활성화/롤백"을 요청할 때 사용.
 argument-hint: "[open|resume|recheck|status|sessions|doctor|validate|enable|rollback]"
 disable-model-invocation: true
 allowed-tools: 'Bash(python3 *)'

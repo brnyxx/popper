@@ -59,9 +59,7 @@ def _strike_until(page, target_slot: int) -> None:
     if not target.evaluate("element => document.activeElement === element"):
         page.keyboard.press("Tab")
     assert target.evaluate("element => document.activeElement === element")
-    current = int(
-        page.locator('[role="progressbar"]').get_attribute("aria-valuenow")
-    )
+    current = int(page.locator('[role="progressbar"]').get_attribute("aria-valuenow"))
     for _ in range(current, target_slot):
         expected = (
             int(page.locator('[role="progressbar"]').get_attribute("aria-valuenow")) + 1
@@ -103,6 +101,12 @@ def test_product_browser_cold_open(page, tmp_path: Path) -> None:
         )
         assert page.locator("#stage-complete").get_attribute("role") == "status"
         assert "산출물이 착지했다" in page.locator("#landing").inner_text()
+        assert page.locator("#next-proof").is_visible()
+        assert "새 Claude Code 세션" in page.locator("#next-proof").inner_text()
+        assert any(
+            rule in page.locator("#next-rule").inner_text()
+            for rule in page.locator("#rules .rule-text").all_inner_texts()
+        )
         assert list(tmp_path.glob("manifest*.json"))
         status = page.locator("#strike-status")
         assert status.get_attribute("role") == "status"
@@ -127,9 +131,9 @@ def test_product_browser_resumes_after_process_restart(page, tmp_path: Path) -> 
         first.wait(timeout=5)
         page.keyboard.press("Enter")
         page.locator("#connection-error").wait_for(state="visible")
-        assert "저장된 슬롯부터 이어진다" in page.locator(
-            "#connection-error"
-        ).inner_text()
+        assert (
+            "저장된 슬롯부터 이어진다" in page.locator("#connection-error").inner_text()
+        )
         assert page.locator("body").get_attribute("data-connection") == "offline"
 
         second, second_url = _start_server(base)

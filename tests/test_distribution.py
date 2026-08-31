@@ -115,8 +115,20 @@ def test_readmes_are_bilingual_brand_first_and_lifecycle_complete() -> None:
         assert "example.test" not in readme
     assert "[한국어](README.ko.md)" in english
     assert "[English](README.md)" in korean
-    assert "Preference, by elimination." in english
-    assert "소거로 찾는 선호." in korean
+    assert "A local CLAUDE.md behavior compiler." in english
+    assert "로컬 CLAUDE.md 행동 컴파일러." in korean
+    assert "Korean-first v1" in english
+    assert "한국어 우선 v1" in korean
+    assert "mined-prior defaults" in english
+    assert "마이닝된 사전 기본값" in korean
+    assert "preference convergence" not in english.lower()
+    assert "선호 수렴" not in korean
+    assert english.index("## The whole product in one example") < english.index(
+        "## Try it as a local console tool"
+    )
+    assert korean.index("## 제품 전체를 한 가지 예로 이해하기") < korean.index(
+        "## 로컬 콘솔 도구로 바로 써 보기"
+    )
     for source, readme in (
         (ROOT / "README.md", english),
         (ROOT / "README.ko.md", korean),
@@ -165,6 +177,11 @@ def test_release_workflows_pin_supply_chain_and_gate_browser_e2e() -> None:
     assert "needs: quality" in release
     assert "chromium firefox webkit" in release
     assert "RUN_CLEAN_PLUGIN_E2E: '1'" in release
+    assert "POPPER_PLUGIN_ROOT: /tmp/popper-plugin" in release
+    assert "python -m zipfile -e /tmp/popper-plugin.zip /tmp/popper-plugin" in release
+    assert "claude plugin validate /tmp/popper-plugin" in release
+    assert "pip install --no-index dist/*.whl" in release
+    assert "/tmp/popper-wheel/bin/popper doctor" in release
     assert "tests/e2e/test_pages.py" in ci
     assert "tests/e2e/test_pages.py" in release
     assert "scripts/check_release_version.py" in release

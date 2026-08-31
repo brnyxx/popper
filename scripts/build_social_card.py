@@ -59,6 +59,7 @@ FONT = {
     ".": "00000 00000 00000 00000 00000 00110 00110",
     ":": "00000 00110 00110 00000 00110 00110 00000",
     "!": "00100 00100 00100 00100 00100 00000 00100",
+    "?": "01110 10001 00001 00010 00100 00000 00100",
     "→": "00100 00100 00100 11111 00100 01100 00110",
     " ": "00000 00000 00000 00000 00000 00000 00000",
 }
@@ -134,32 +135,24 @@ def main() -> None:
         else Path(".github/assets/social-card.png")
     )
     canvas = bytearray([COLOR_INDEX[PAPER]]) * (W * H)
-    # Logo-derived contrast pair and a single crimson falsification strike.
-    rect(canvas, 64, 70, 190, 190, INK)
-    rect(canvas, 72, 78, 174, 174, PAPER)
-    rect(canvas, 286, 70, 190, 190, INK)
-    rect(canvas, 294, 78, 174, 174, SURFACE)
-    for i in range(0, 170, 4):
-        rect(canvas, 72 + i, 78 + i, 15, 15, CRIMSON)
-    # Nine-by-nine hypothesis field narrowing to one survivor.
-    for r in range(3):
-        for c in range(3):
-            rect(canvas, 70 + c * 30, 370 + r * 30, 12, 12, INK)
-    rect(canvas, 178, 402, 70, 6, INK)
-    rect(canvas, 242, 394, 14, 6, INK)
-    rect(canvas, 250, 402, 6, 14, INK)
-    rect(canvas, 288, 389, 38, 38, CRIMSON)
-    rect(canvas, 298, 405, 18, 6, PAPER)
-    text(canvas, 64, 500, "6,561", 8, INK)
-    rect(canvas, 350, 526, 70, 7, INK)
-    rect(canvas, 405, 514, 7, 31, INK)
-    rect(canvas, 412, 520, 7, 19, INK)
-    rect(canvas, 419, 526, 7, 7, INK)
-    text(canvas, 456, 500, "RULES", 8, CRIMSON)
-    text(canvas, 690, 82, "POPPER", 12, INK, gap=3)
-    rect(canvas, 694, 176, 410, 6, CRIMSON)
-    text(canvas, 690, 236, "NO QUESTIONS.", 5, INK)
-    text(canvas, 690, 292, "STRIKE THE WRONG SIDE.", 3, INK)
+    # Concrete red-pen behavior test: cross out the bad transcript and retain the survivor.
+    text(canvas, 64, 48, "POPPER", 8, INK, gap=3)
+    text(canvas, 64, 112, "CLAUDE.MD BEHAVIOR COMPILER", 3, MUTED, gap=2)
+    text(canvas, 64, 166, "FIX THE BUG.", 7, INK, gap=2)
+    rect(canvas, 64, 248, 470, 118, PAPER)
+    rect(canvas, 64, 248, 470, 6, INK)
+    text(canvas, 82, 272, "SHOULD I START?", 5, INK, gap=2)
+    for i in range(0, 420, 4):
+        rect(canvas, 78 + i, 266 + i // 5, 12, 12, CRIMSON)
+    rect(canvas, 64, 392, 470, 118, SURFACE)
+    rect(canvas, 64, 392, 470, 6, INK)
+    text(canvas, 82, 416, "FIXED. TESTS PASS.", 4, INK, gap=2)
+    text(canvas, 610, 248, "GENERATED RULE", 3, MUTED, gap=2)
+    rect(canvas, 610, 280, 526, 170, PAPER)
+    rect(canvas, 610, 280, 526, 7, INK)
+    text(canvas, 636, 320, "ACT FIRST.", 7, INK, gap=2)
+    text(canvas, 636, 390, "REPORT AFTER.", 6, INK, gap=2)
+    text(canvas, 64, 560, "CROSS OUT THE WRONG BEHAVIOR. KEEP THE RULE.", 3, INK, gap=2)
     rows: list[bytes] = []
     for y in range(H):
         row = canvas[y * W : (y + 1) * W]

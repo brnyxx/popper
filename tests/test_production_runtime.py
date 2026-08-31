@@ -287,7 +287,6 @@ class ValidationProbeTest(unittest.TestCase):
             self.session.undo()
 
     def test_stale_presentation_is_rejected(self) -> None:
-        pair = self.session.snapshot().pair
         with self.assertRaises(StalePresentation):
             self.session.strike(
                 "left", expected_pair_id="stale", expected_slot=1

@@ -186,6 +186,7 @@ def test_rendered_routes_have_matching_structure_links_and_seo(tmp_path: Path) -
     assert en_outline.structure == ko_outline.structure
     assert [item[1] for item in en_outline.structure if item[0] == "section"] == [
         "hero",
+        "outcome",
         "mechanism",
         "start",
         "boundaries",
@@ -212,6 +213,16 @@ def test_rendered_routes_have_matching_structure_links_and_seo(tmp_path: Path) -
     assert (
         "verify_checksums.py SHA256SUMS --only "
         f"popper-plugin-{builder.project_version()}.zip" in english
+    )
+    assert (
+        f"/releases/download/v{builder.project_version()}/"
+        f"popper-{builder.project_version()}-py3-none-any.whl" in english
+    )
+    assert 'class="storyboard" aria-hidden="true"' in english
+    assert "Korean-first v1" in english
+    assert "mined-prior defaults" in english
+    assert (
+        "자율성, 범위 준수, 테스트 규율, 주석·문서화, 오류 처리, 커밋 스타일" in korean
     )
 
 
@@ -244,6 +255,18 @@ def test_brand_assets_are_local_deterministic_and_social_ready(tmp_path: Path) -
         assert dimensions in body
         assert "<script" not in body.lower()
         assert not re.search(r"(?:xlink:)?href\s*=", body, re.I)
+        assert "check" not in body.lower()
+        assert body.count("#D92332") == 1
+    hero = (ROOT / ".github" / "assets" / "hero.svg").read_text(encoding="utf-8")
+    for message in (
+        "FIX THE BUG.",
+        "SHOULD I START?",
+        "FIXED. TESTS PASS.",
+        "ACT FIRST.",
+        "REPORT AFTER.",
+        "CLAUDE.md BEHAVIOR COMPILER",
+    ):
+        assert message in hero
 
 
 def test_site_css_meets_responsive_theme_focus_and_contrast_contract() -> None:
@@ -269,6 +292,10 @@ def test_site_css_meets_responsive_theme_focus_and_contrast_contract() -> None:
     assert "color-scheme: light" in root.group(1)
     assert "@media (prefers-color-scheme: dark)" in active
     assert "@media (prefers-reduced-motion: reduce)" in active
+    assert "animation: story-next 4.8s both" in compact
+    assert "infinite" not in active
+    assert ".story-falsified .strike-line" in active
+    assert ".story-rule, .story-next { opacity: 1; transform: none; }" in compact
     assert "min-height: 44px" in active
     assert "@media (max-width: 760px)" in active
     assert "overflow-x: auto" in active

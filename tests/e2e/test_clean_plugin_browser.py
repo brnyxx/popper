@@ -25,7 +25,9 @@ def test_clean_plugin_browser(page, tmp_path: Path) -> None:
     home.mkdir()
     env = {**os.environ, "HOME": str(home)}
     env.pop("CLAUDE_CONFIG_DIR", None)
-    repo = Path(__file__).resolve().parents[2]
+    repo = Path(
+        os.environ.get("POPPER_PLUGIN_ROOT", Path(__file__).resolve().parents[2])
+    ).resolve()
     marketplace = "popper-marketplace"
     plugin_id = "popper@popper-marketplace"
     subprocess.run(
@@ -145,6 +147,12 @@ def test_clean_plugin_browser(page, tmp_path: Path) -> None:
             "element => document.activeElement === element"
         )
         assert "산출물이 착지했다" in page.locator("#landing").inner_text()
+        assert page.locator("#next-proof").is_visible()
+        assert "/popper:popper enable" in page.locator("#next-proof").inner_text()
+        assert any(
+            rule in page.locator("#next-rule").inner_text()
+            for rule in page.locator("#rules .rule-text").all_inner_texts()
+        )
         assert second.wait(timeout=5) == 0
 
         claude_md = home / ".claude" / "CLAUDE.md"

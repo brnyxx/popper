@@ -403,8 +403,12 @@ class TestSealedExampleArtifact:
         )
         counts = result.cell_counts()
         # 복원 룰이 없으면 매핑축은 전부 미판별, 장외 문장은 unmappable로만 남는다
-        assert counts[CELL_UNDISCRIMINATED] == sum(1 for l in gt.labels if l.mappable)
-        assert counts[CELL_UNMAPPABLE] == sum(1 for l in gt.labels if not l.mappable)
+        assert counts[CELL_UNDISCRIMINATED] == sum(
+            1 for label in gt.labels if label.mappable
+        )
+        assert counts[CELL_UNMAPPABLE] == sum(
+            1 for label in gt.labels if not label.mappable
+        )
         assert counts[CELL_RESTORED] == 0
         assert counts[CELL_MIS_RESTORED] == 0
 

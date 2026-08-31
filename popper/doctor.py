@@ -11,7 +11,7 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Callable
 
-from popper.compiler import MANIFEST_JSON, OUTPUT_FILES, verify_outputs
+from popper.compiler import OUTPUT_FILES, verify_outputs
 from popper.fixtures import load_pack
 from popper.scoring import (
     DEFAULT_GROUND_TRUTH_HASH_PATH,
