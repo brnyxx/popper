@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -57,14 +58,23 @@ def test_clean_plugin_browser(page, tmp_path: Path) -> None:
     ]
     assert candidates, f"plugin cache version not found under {cache}"
 
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "package.json").write_text('{"name":"fixture"}\n', encoding="utf-8")
+    (project / "index.ts").write_text("export const ready = true;\n", encoding="utf-8")
+    launcher = candidates[0] / "scripts" / "popper_plugin.py"
+    assert launcher.is_file()
     process, url = _start_server(
         tmp_path / "landed",
-        cwd=candidates[0],
+        cwd=project,
         env=env,
+        command=[sys.executable, str(launcher)],
+        extra_args=["--repo", str(project)],
     )
     try:
         page.goto(url, wait_until="domcontentloaded")
         page.locator('[data-strike-target="left"]').wait_for(state="visible")
+        assert "Node.js" in page.locator("#left-text").inner_text()
         _finish_with_keyboard(page)
         assert "산출물이 착지했다" in page.locator("#landing").inner_text()
         assert process.wait(timeout=5) == 0

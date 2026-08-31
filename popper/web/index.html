@@ -132,6 +132,15 @@
     color: var(--text-2);
     font-size: 13px;
   }
+  .connection-error {
+    margin: 0;
+    padding: 10px 24px;
+    color: #ffd6db;
+    background: #5b1823;
+    border-bottom: 1px solid #8d2d3d;
+    font-size: 14px;
+  }
+  .connection-error:empty { display: none; }
   main {
     flex: 1;
     display: grid;
@@ -377,6 +386,8 @@
 <p class="banner" id="banner" role="status" aria-live="polite" aria-atomic="true">{{BANNER}}</p>
 <p id="strike-status" class="sr-only" role="status"
    aria-live="polite" aria-atomic="true"></p>
+<p id="connection-error" class="connection-error" role="alert"
+   aria-live="assertive" aria-atomic="true"></p>
 
 <main>
   <section class="stage">
@@ -523,6 +534,8 @@
 
   function paint(state) {
     currentState = state;
+    document.getElementById("connection-error").textContent = "";
+    document.body.setAttribute("data-connection", "online");
     document.getElementById("remaining").textContent =
       state.remaining_combinations.toLocaleString("ko-KR");
     document.getElementById("eliminated").textContent =
@@ -563,20 +576,31 @@
       return;
     }
     busy = true;
+    var synchronized = false;
     fetch(path, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body || {})
     }).then(function (res) {
       if (res.status === 409) {
+        synchronized = true;
         return fetch("/state").then(function (fresh) { return fresh.json(); });
       }
       if (!res.ok) {
         throw new Error("요청이 기각됐다: " + res.status);
       }
       return res.json();
-    }).then(paint).catch(function (err) {
+    }).then(function (state) {
+      paint(state);
+      if (synchronized) {
+        document.getElementById("strike-status").textContent =
+          "다른 탭의 변경을 감지해 최신 세션 상태로 맞췄다.";
+      }
+    }).catch(function (err) {
       console.error(err);
+      document.body.setAttribute("data-connection", "offline");
+      document.getElementById("connection-error").textContent =
+        "연결이 끊겼다. 같은 명령을 다시 실행하면 저장된 슬롯부터 이어진다.";
       clearStriking();
     }).finally(function () {
       busy = false;

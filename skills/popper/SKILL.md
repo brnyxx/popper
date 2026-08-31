@@ -1,8 +1,8 @@
 ---
 description: 반증(긋기)만으로 Claude Code 설정을 수렴시키는 로컬 웹 UI를 연다. 설정 인터뷰/질문 대신 대비 페어 트랜스크립트를 긋는다. 사용자가 "popper", "긋기 세션", "설정 수렴", "재심(recheck)"을 요청할 때 사용.
-argument-hint: "[open|recheck|status|validate]"
+argument-hint: "[open|resume|recheck|status|sessions|doctor|validate]"
 disable-model-invocation: true
-allowed-tools: 'Bash(cd "${CLAUDE_PLUGIN_ROOT}"), Bash(python3 *)'
+allowed-tools: 'Bash(python3 *)'
 ---
 
 # Popper - 긋기 세션
@@ -18,7 +18,7 @@ Popper는 질문 대신 반증 가능한 대비 페어를 제시하고, 사용�
 ## 실행 규칙
 
 `status` 외 인자를 실행하기 전에는 반드시
-`cd "${CLAUDE_PLUGIN_ROOT}" && python3 -m popper status`를 먼저 실행해
+`python3 "${CLAUDE_PLUGIN_ROOT}/scripts/popper_plugin.py" status`를 먼저 실행해
 재심 대기 배너를 확인하고, 배너가 있으면 사용자에게 한 줄로 전달한다.
 
 그 뒤 인자 `$ARGUMENTS`에 따라 아래 명령을 **백그라운드로** 실행하고, 로그에 찍힌
@@ -27,13 +27,16 @@ Popper는 질문 대신 반증 가능한 대비 페어를 제시하고, 사용�
 
 | 인자 | 명령 | 설명 |
 |---|---|---|
-| (없음) 또는 `open` | `cd "${CLAUDE_PLUGIN_ROOT}" && python3 -m popper open --no-browser` | 일반 세션 (15긋기, 완주 시 ~/.claude/popper/ 착지) |
-| `recheck` | `cd "${CLAUDE_PLUGIN_ROOT}" && python3 -m popper recheck --no-browser` | 4막 경량 재심 (5-7긋기, 재심 큐 선두) |
-| `validate` | `cd "${CLAUDE_PLUGIN_ROOT}" && python3 -m popper validate --no-browser` | 검증 세션 (판별 13 + 미러 프로브 2) |
-| `status` | `cd "${CLAUDE_PLUGIN_ROOT}" && python3 -m popper status` | 착지/재심 배너/자기반증 판정 요약 (서버 없음) |
+| (없음) 또는 `open` | `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/popper_plugin.py" open --no-browser --repo "$PWD"` | 미완료 일반 세션 1건이면 계속하고, 없으면 새 15긋기 세션 |
+| `resume [id]` | `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/popper_plugin.py" resume [id] --no-browser --repo "$PWD"` | 중단 세션 재개 |
+| `recheck` | `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/popper_plugin.py" recheck --no-browser --repo "$PWD"` | 4막 경량 재심 |
+| `validate` | `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/popper_plugin.py" validate --no-browser --repo "$PWD"` | 검증 세션 |
+| `status` | `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/popper_plugin.py" status` | 착지/활성화/재개/판정 요약 |
+| `sessions` | `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/popper_plugin.py" sessions` | 최근 세션 목록 |
+| `doctor` | `python3 "${CLAUDE_PLUGIN_ROOT}/scripts/popper_plugin.py" doctor` | 설치·데이터·replay 로컬 진단 |
 
-현재 작업 중인 레포의 맥락으로 페어를 렌더하려면 `--repo <프로젝트 경로>`를
-붙인다 (읽기전용 스캔, 파일 내용은 읽지 않는다).
+`--repo "$PWD"`는 현재 작업 레포를 읽기 전용으로 스캔해 페어의 기술 문맥만
+치환한다. 파일 내용은 읽지 않는다.
 
 ## 위 상태 출력에 "재심 대기 N건" 배너가 있으면
 

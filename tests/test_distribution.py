@@ -51,6 +51,7 @@ def test_plugin_archive_is_deterministic_and_self_contained(tmp_path: Path) -> N
         assert names == sorted(names)
         assert ".claude-plugin/plugin.json" in names
         assert "skills/popper/SKILL.md" in names
+        assert "scripts/popper_plugin.py" in names
         assert "popper/_data/prereg/prereg_sealed.txt" in names
         assert "popper/_data/ground_truth/ground_truth.txt" in names
         assert "LICENSE" in names

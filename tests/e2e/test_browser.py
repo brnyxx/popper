@@ -12,17 +12,22 @@ URL_RE = re.compile(r"(https?://127\.0\.0\.1:\d+/)")
 
 
 def _start_server(
-    base_dir: Path, *, cwd: Path | None = None, env: dict[str, str] | None = None
+    base_dir: Path,
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+    command: list[str] | None = None,
+    extra_args: list[str] | None = None,
 ) -> tuple[subprocess.Popen[str], str]:
+    prefix = command or [sys.executable, "-m", "popper"]
     process = subprocess.Popen(
         [
-            sys.executable,
-            "-m",
-            "popper",
+            *prefix,
             "open",
             "--no-browser",
             "--base-dir",
             str(base_dir),
+            *(extra_args or []),
         ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -48,11 +53,15 @@ def _start_server(
     raise AssertionError("server URL was not logged: " + "".join(lines))
 
 
-def _finish_with_keyboard(page) -> None:
+def _strike_until(page, target_slot: int) -> None:
     target = page.locator('[data-strike-target="left"]').first
-    page.keyboard.press("Tab")
+    if not target.evaluate("element => document.activeElement === element"):
+        page.keyboard.press("Tab")
     assert target.evaluate("element => document.activeElement === element")
-    for _ in range(15):
+    current = int(
+        page.locator('[role="progressbar"]').get_attribute("aria-valuenow")
+    )
+    for _ in range(current, target_slot):
         expected = (
             int(page.locator('[role="progressbar"]').get_attribute("aria-valuenow")) + 1
         )
@@ -62,6 +71,10 @@ def _finish_with_keyboard(page) -> None:
             .getAttribute('aria-valuenow')) >= expected""",
             arg=expected,
         )
+
+
+def _finish_with_keyboard(page) -> None:
+    _strike_until(page, 15)
     page.locator("#stage-complete").wait_for(state="visible")
 
 
@@ -85,3 +98,41 @@ def test_product_browser_cold_open(page, tmp_path: Path) -> None:
         if process.poll() is None:
             process.kill()
         process.wait(timeout=5)
+
+
+def test_product_browser_resumes_after_process_restart(page, tmp_path: Path) -> None:
+    base = tmp_path / "resume-data"
+    first, first_url = _start_server(base)
+    second: subprocess.Popen[str] | None = None
+    try:
+        page.goto(first_url, wait_until="domcontentloaded")
+        page.locator('[data-strike-target="left"]').wait_for(state="visible")
+        _strike_until(page, 4)
+        first.terminate()
+        first.wait(timeout=5)
+        page.keyboard.press("Enter")
+        page.locator("#connection-error").wait_for(state="visible")
+        assert "저장된 슬롯부터 이어진다" in page.locator(
+            "#connection-error"
+        ).inner_text()
+        assert page.locator("body").get_attribute("data-connection") == "offline"
+
+        second, second_url = _start_server(base)
+        page.goto(second_url, wait_until="domcontentloaded")
+        assert (
+            page.get_by_role("progressbar", name="세션 슬롯 진행").get_attribute(
+                "aria-valuenow"
+            )
+            == "4"
+        )
+        _finish_with_keyboard(page)
+        assert "산출물이 착지했다" in page.locator("#landing").inner_text()
+        assert second.wait(timeout=5) == 0
+    finally:
+        if first.poll() is None:
+            first.kill()
+        first.wait(timeout=5)
+        if second is not None:
+            if second.poll() is None:
+                second.kill()
+            second.wait(timeout=5)

@@ -8,7 +8,7 @@ from pathlib import Path
 import stat
 import zipfile
 
-ROOT_FILES = ("LICENSE", "README.md", "pyproject.toml")
+ROOT_FILES = ("LICENSE", "README.md", "pyproject.toml", "scripts/popper_plugin.py")
 DIRECTORIES = (".claude-plugin", "skills", "popper")
 EXCLUDED_PARTS = {
     "__pycache__",
