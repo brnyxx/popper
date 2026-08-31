@@ -18,12 +18,13 @@ def _start_server(
     env: dict[str, str] | None = None,
     command: list[str] | None = None,
     extra_args: list[str] | None = None,
+    operation: str = "open",
 ) -> tuple[subprocess.Popen[str], str]:
     prefix = command or [sys.executable, "-m", "popper"]
     process = subprocess.Popen(
         [
             *prefix,
-            "open",
+            operation,
             "--no-browser",
             "--base-dir",
             str(base_dir),
@@ -83,10 +84,24 @@ def test_product_browser_cold_open(page, tmp_path: Path) -> None:
     try:
         page.goto(url, wait_until="domcontentloaded")
         page.locator('[data-strike-target="left"]').wait_for(state="visible")
-        assert page.get_by_role("button", name="왼쪽 긋기").count() == 1
-        assert page.get_by_role("button", name="오른쪽 긋기").count() == 1
+        assert (
+            page.get_by_role(
+                "button", name=re.compile(r"왼쪽 긋기.+README", re.S)
+            ).count()
+            == 1
+        )
+        assert (
+            page.get_by_role(
+                "button", name=re.compile(r"오른쪽 긋기.+README", re.S)
+            ).count()
+            == 1
+        )
         assert page.get_by_role("progressbar", name="세션 슬롯 진행").count() == 1
         _finish_with_keyboard(page)
+        assert page.locator("#stage-complete").evaluate(
+            "element => document.activeElement === element"
+        )
+        assert page.locator("#stage-complete").get_attribute("role") == "status"
         assert "산출물이 착지했다" in page.locator("#landing").inner_text()
         assert list(tmp_path.glob("manifest*.json"))
         status = page.locator("#strike-status")

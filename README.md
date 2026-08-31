@@ -14,10 +14,11 @@
 
 ## Quickstart
 
-Claude Code marketplace에서 설치하고 첫 로컬 진단을 실행한다.
+origin 없는 Popper 소스 체크아웃 루트에서 로컬 marketplace로 설치하고 첫
+진단을 실행한다.
 
 ```bash
-claude plugin marketplace add <repository-url>
+claude plugin marketplace add "$PWD"
 claude plugin install popper@popper-marketplace
 ```
 
@@ -163,11 +164,13 @@ python3 -m pytest tests/ -q    # 전체 스위트
 Popper 1.1.0은 Python 3.10–3.14, macOS/Linux/Windows에서 지원된다.
 브라우저 검증은 Chromium, Firefox, WebKit을 사용한다.
 
-공식 marketplace를 등록한 뒤 설치한다:
+릴리스 ZIP만 받은 경우 다음 경로에 풀어 같은 로컬 marketplace로 등록한다:
 
-```text
-/plugin marketplace add <repository-url>
-/plugin install popper@popper-marketplace
+```bash
+mkdir -p "$HOME/.local/share/popper-1.1.0"
+python3 -m zipfile -e popper-plugin-1.1.0.zip "$HOME/.local/share/popper-1.1.0"
+claude plugin marketplace add "$HOME/.local/share/popper-1.1.0"
+claude plugin install popper@popper-marketplace
 ```
 
 체크아웃한 플러그인을 시험할 때는 다음처럼 로컬 경로를 지정한다:

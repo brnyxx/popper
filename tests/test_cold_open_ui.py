@@ -393,12 +393,19 @@ class StrikeOnlyAffordanceTest(ServerCase):
         self.assertNotIn('type="submit"', self.html)
 
     def test_panes_are_reachable_by_keyboard(self) -> None:
-        panes = [a for a in self.scan.affordances if a.tag == "article"]
+        panes = [
+            affordance
+            for affordance in self.scan.affordances
+            if affordance.tag == "button"
+            and "pane" in affordance.attrs.get("class", "").split()
+        ]
         self.assertEqual(len(panes), 2)
         for pane in panes:
             with self.subTest(target=pane.strike_target):
-                self.assertEqual(pane.attrs.get("role"), "button")
-                self.assertEqual(pane.attrs.get("tabindex"), "0")
+                self.assertEqual(pane.attrs.get("type"), "button")
+                self.assertIsNone(pane.attrs.get("role"))
+                self.assertIsNone(pane.attrs.get("tabindex"))
+                self.assertIn("-text", pane.attrs.get("aria-labelledby", ""))
 
     def test_server_accepts_no_verb_other_than_striking(self) -> None:
         """쓰기 경로는 /strike 하나뿐이고 승인 경로는 존재하지 않는다."""

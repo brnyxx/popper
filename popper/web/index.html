@@ -172,6 +172,10 @@
     gap: var(--gap);
   }
   .pane {
+    width: 100%;
+    color: inherit;
+    font: inherit;
+    text-align: left;
     background: var(--surface);
     border: 1px solid var(--line);
     border-radius: 10px;
@@ -204,6 +208,7 @@
     color: var(--text-3);
   }
   .transcript {
+    display: block;
     margin: 0;
     white-space: pre-wrap;
     font-size: 15px;
@@ -393,17 +398,19 @@
   <section class="stage">
     <div class="stage-live" id="stage-live">
       <p class="axis">대비 축 <strong id="axis-label">{{AXIS_LABEL}}</strong></p>
-      <p class="hint">틀렸다고 보이는 쪽을 그어라. 그은 값은 가설 공간에서 곧바로 빠지고, 오른쪽 컴파일 페인의 룰이 그 자리에서 다시 쓰인다.</p>
+      <p class="hint" id="strike-hint">틀렸다고 보이는 쪽을 그어라. 그은 값은 가설 공간에서 곧바로 빠지고, 오른쪽 컴파일 페인의 룰이 그 자리에서 다시 쓰인다.</p>
 
       <div class="panes">
-        <article class="pane" data-strike-target="left" role="button" tabindex="0" aria-label="왼쪽 긋기">
-          <p class="pane-label">왼쪽</p>
-          <p class="transcript" id="left-text">{{LEFT_TEXT}}</p>
-        </article>
-        <article class="pane" data-strike-target="right" role="button" tabindex="0" aria-label="오른쪽 긋기">
-          <p class="pane-label">오른쪽</p>
-          <p class="transcript" id="right-text">{{RIGHT_TEXT}}</p>
-        </article>
+        <button type="button" class="pane" data-strike-target="left"
+                aria-labelledby="left-label left-text" aria-describedby="strike-hint">
+          <span class="pane-label" id="left-label">왼쪽 긋기</span>
+          <span class="transcript" id="left-text">{{LEFT_TEXT}}</span>
+        </button>
+        <button type="button" class="pane" data-strike-target="right"
+                aria-labelledby="right-label right-text" aria-describedby="strike-hint">
+          <span class="pane-label" id="right-label">오른쪽 긋기</span>
+          <span class="transcript" id="right-text">{{RIGHT_TEXT}}</span>
+        </button>
       </div>
 
       <div class="extra">
@@ -413,8 +420,10 @@
       </div>
     </div>
 
-    <div class="stage-complete" id="stage-complete">
-      <h2 class="complete-head">세션이 닫혔다</h2>
+    <div class="stage-complete" id="stage-complete" role="status"
+         aria-live="polite" aria-atomic="true" aria-labelledby="complete-head"
+         tabindex="-1">
+      <h2 class="complete-head" id="complete-head">세션이 닫혔다</h2>
       <p class="complete-sub" id="complete-sub">긋기 슬롯을 전부 썼다. 아래는 이 세션의 착지 결과다.</p>
       <p class="voided" id="voided"></p>
       <div class="landing" id="landing">{{LANDING}}</div>
@@ -533,6 +542,7 @@
   }
 
   function paint(state) {
+    var wasComplete = document.body.getAttribute("data-state") === "complete";
     currentState = state;
     document.getElementById("connection-error").textContent = "";
     document.body.setAttribute("data-connection", "online");
@@ -563,6 +573,9 @@
       document.getElementById("voided").textContent =
         state.voided_reason ? (VOID_REASONS[state.voided_reason] || state.voided_reason) : "";
       paintLanding(state.landing);
+      if (!wasComplete) {
+        document.getElementById("stage-complete").focus();
+      }
     }
 
     document.querySelectorAll(".pane.striking").forEach(function (pane) {
@@ -632,12 +645,6 @@
     var target = node.getAttribute("data-strike-target");
     node.addEventListener("click", function () {
       draw(target);
-    });
-    node.addEventListener("keydown", function (ev) {
-      if (ev.key === "Enter" || ev.key === " ") {
-        ev.preventDefault();
-        draw(target);
-      }
     });
   });
 

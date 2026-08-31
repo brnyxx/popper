@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from .test_browser import _finish_with_keyboard, _start_server
+from .test_browser import _finish_with_keyboard, _start_server, _strike_until
 
 
 def test_clean_plugin_browser(page, tmp_path: Path) -> None:
@@ -70,21 +70,67 @@ def test_clean_plugin_browser(page, tmp_path: Path) -> None:
     (project / "index.ts").write_text("export const ready = true;\n", encoding="utf-8")
     launcher = candidates[0] / "scripts" / "popper_plugin.py"
     assert launcher.is_file()
-    process, url = _start_server(
-        tmp_path / "landed",
+    landed = tmp_path / "landed"
+    doctor = subprocess.run(
+        [
+            sys.executable,
+            str(launcher),
+            "doctor",
+            "--base-dir",
+            str(landed),
+            "--json",
+        ],
+        cwd=project,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert json.loads(doctor.stdout)["healthy"] is True
+
+    first, url = _start_server(
+        landed,
         cwd=project,
         env=env,
         command=[sys.executable, str(launcher)],
         extra_args=["--repo", str(project)],
     )
+    second: subprocess.Popen[str] | None = None
     try:
         page.goto(url, wait_until="domcontentloaded")
         page.locator('[data-strike-target="left"]').wait_for(state="visible")
         assert "Node.js" in page.locator("#left-text").inner_text()
+        _strike_until(page, 4)
+        first.terminate()
+        first.wait(timeout=5)
+
+        second, resumed_url = _start_server(
+            landed,
+            cwd=project,
+            env=env,
+            command=[sys.executable, str(launcher)],
+            extra_args=["--repo", str(project)],
+            operation="resume",
+        )
+        page.goto(resumed_url, wait_until="domcontentloaded")
+        assert (
+            page.get_by_role("progressbar", name="세션 슬롯 진행").get_attribute(
+                "aria-valuenow"
+            )
+            == "4"
+        )
+        assert "Node.js" in page.locator("#left-text").inner_text()
         _finish_with_keyboard(page)
+        assert page.locator("#stage-complete").evaluate(
+            "element => document.activeElement === element"
+        )
         assert "산출물이 착지했다" in page.locator("#landing").inner_text()
-        assert process.wait(timeout=5) == 0
+        assert second.wait(timeout=5) == 0
     finally:
-        if process.poll() is None:
-            process.kill()
-        process.wait(timeout=5)
+        if first.poll() is None:
+            first.kill()
+        first.wait(timeout=5)
+        if second is not None:
+            if second.poll() is None:
+                second.kill()
+            second.wait(timeout=5)
