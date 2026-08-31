@@ -31,7 +31,13 @@ logger = logging.getLogger(__name__)
 
 CATALOG_VERSION = "v1"
 
-FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
+_SOURCE_FIXTURES_DIR = Path(__file__).resolve().parent.parent / "fixtures"
+_PACKAGED_FIXTURES_DIR = Path(__file__).resolve().parent / "_data" / "fixtures"
+FIXTURES_DIR = (
+    _SOURCE_FIXTURES_DIR
+    if _SOURCE_FIXTURES_DIR.is_dir()
+    else _PACKAGED_FIXTURES_DIR
+)
 
 MANIFEST_FILE = "pack_manifest.json"
 SKELETON_FILE = "scene_skeleton.json"

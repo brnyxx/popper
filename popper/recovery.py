@@ -323,6 +323,39 @@ def fold_recovery(
             continue
 
         etype = event.type
+        if etype is EventType.UNDO_TOMBSTONE:
+            origin = str(
+                event.payload.get("strike_event_id")
+                or event.payload.get("target_event_id")
+                or ""
+            )
+            key = next((key for key, active_id in active.items() if active_id == origin), None)
+            if key is None:
+                trace.append(remaining())
+                continue
+            del active[key]
+            voided.add(origin)
+            pairs = applied_by.get(origin, ())
+            for axis, value in pairs:
+                pending[(origin, axis, value)] = PendingRevive(
+                    axis=axis,
+                    value=value,
+                    strike_event_id=origin,
+                )
+                work[axis].refutation_count -= 1
+            for record in contradictions:
+                if record.strike_event_id == origin:
+                    work[record.axis].contested_by.discard(origin)
+            tombstones.append(
+                TombstoneRecord(
+                    strike_event_id=origin,
+                    key=key,
+                    voided_pairs=pairs,
+                )
+            )
+            trace.append(remaining())
+            continue
+
         if etype is EventType.SESSION_START:
             if strikes_in_session or current_kind != _session_kind(event.payload):
                 sessions_ended += 1

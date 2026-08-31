@@ -1,0 +1,257 @@
+{
+  "artifact": "popper_preregistration",
+  "seal": {
+    "algorithm": "sha256",
+    "sealed_field": "document",
+    "canonicalization": "json.dumps(document, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode('utf-8')",
+    "digest": "568bd7b6c3c16c265d058469eed1086ab402ce1a7b97c380314c84492a18d4ea",
+    "same_machinery_as": "ground_truth_label_seal"
+  },
+  "document": {
+    "title": "Popper 핵심 추측 반증 사전등록 문서 (봉인본)",
+    "prereg_id": "popper-prereg-v1",
+    "catalog_version": "v1",
+    "metric_spec_version": "core-metric-v1",
+    "sealed_at": "2026-08-28T00:00:00Z",
+    "sealed_before_session_1": true,
+    "sessions_observed_at_seal_time": 0,
+    "core_conjecture": "긋기(strike)만으로 - 어떤 긍정 입력도 없이 - 사용자의 Claude Code 설정이 8축 x 3값 가설 공간에서 실제 선호로 수렴한다.",
+    "core_refutation_target": "판별시험-통과 축의 오복원만을 기소한다. unmappable은 카탈로그 belt, 무차별 생존/미시험은 픽스처-능동학습기 belt, 교정 셀은 core 분모에서 제외한다.",
+    "frozen_parameters": {
+      "strike_cap_per_session": {
+        "value": 15,
+        "unit": "strikes",
+        "note": "제품(product) 세션은 정확히 15 스트라이크 + 프로브 0개. 검증(validation) 세션도 정확히 15이며 판별 13 + 미러 프로브 2로 쪼갠다. 12-15 같은 범위 표기는 폐기 - optional stopping 차단."
+      },
+      "validation_session_count_n_val": {
+        "value": 2,
+        "unit": "sessions",
+        "note": "검증 세션 수 N_val. 축 하한 미달로 유효 세션이 모자랄 때만 3세션째로 연장하며 그 외 자동 연장은 없다. S_scn과는 별개 기호다."
+      },
+      "fixture_scenario_count_s_scn": {
+        "value": 1,
+        "unit": "scenarios",
+        "note": "픽스처 시나리오 세트 수 S_scn. 검증 2세션은 동일 시나리오를 재사용하며 그로 인한 기억 효과를 네 번째 타당도 위협으로 등재한다."
+      },
+      "discriminated_axis_floor_per_session": {
+        "value": 5,
+        "unit": "axes",
+        "note": "세션 유효성 하한. 완전 판별 통과 축이 이 값 미만이면 session_voided(reason=axis_shortfall)를 방출하고 판정 세션에 산입하지 않는다."
+      },
+      "cumulative_discriminative_instance_floor": {
+        "value": 6,
+        "unit": "instances (전체 합산)",
+        "note": "판정 성립에 필요한 판별시험-통과 인스턴스 누적 하한. 세션별이 아니라 전체 합산 단위이며, 미달 시 3세션째로 연장한다."
+      },
+      "label_reversal_void_threshold_percent": {
+        "value": 30,
+        "unit": "percent",
+        "note": "봉인 라벨 번복 상한. 개봉 후 번복율이 이 값을 초과하면 해당 세션 전체를 VOID 처리한다 - 라벨 탓 배제 절차의 유일한 출구."
+      }
+    },
+    "session_slot_layout": {
+      "product": {
+        "discriminative_slots": 15,
+        "probe_slots": []
+      },
+      "validation": {
+        "discriminative_slots": 13,
+        "probe_slots": [
+          9,
+          13
+        ]
+      },
+      "recheck": {
+        "discriminative_slots_min": 5,
+        "discriminative_slots_max": 7,
+        "probe_slots": []
+      }
+    },
+    "threats_to_validity": [
+      {
+        "id": "t1_fixture",
+        "name": "픽스처 편향",
+        "statement": "대비 페어 자체가 한쪽을 유도해 긋기가 선호가 아닌 작문 품질을 반영할 위험.",
+        "countermeasure": "제3모델 조작점검 통과 쌍만 판별시험으로 인정한다."
+      },
+      {
+        "id": "t2_caprice",
+        "name": "사용자 변덕",
+        "statement": "같은 축에서 세션마다 다른 값을 그어 수렴 자체가 허상일 위험.",
+        "countermeasure": "미러 프로브로 flip을 직접 관측하고, 관측된 축만 '불안정' 등급으로 격리한다."
+      },
+      {
+        "id": "t3_label",
+        "name": "정답지 오류",
+        "statement": "룰 문장 -> 축x값 라벨이 틀려 오복원이 과대/과소 집계될 위험.",
+        "countermeasure": "다른 모델 계열 초안 -> 세션 전 해시 봉인 -> 세션 후 개봉 + 본인 검수, 번복은 명시 채널로만."
+      },
+      {
+        "id": "t4_memory",
+        "name": "기억 효과 (S_scn=1 동일 시나리오 재사용)",
+        "statement": "검증 2세션이 같은 시나리오를 재사용하므로 2세션째 긋기가 선호가 아니라 1세션째 기억의 재연일 위험. S_scn=1을 택한 대가로 명시 등재한다.",
+        "countermeasure": [
+          "페어 제시 순서 재무작위화",
+          "좌우(left/right) 배치 재무작위화",
+          "세션 간 최소 48시간 간격 강제",
+          "능동학습기 경로 다변화로 동일 페어 시퀀스 재현 차단"
+        ],
+        "inter_session_gap_hours_min": 48
+      }
+    ],
+    "three_culprit_exclusion_procedure": {
+      "principle": "오복원이 관측됐을 때 '픽스처 탓 / 변덕 탓 / 라벨 탓'으로 빠져나가는 경로를 데이터 관찰 이전에 봉인한다. 아래 조건을 만족하지 않는 오복원은 무변명 코어히트다.",
+      "fixture_defense": {
+        "admissible_only_if": "제3모델(픽스처 저작 모델 및 라벨 모델과 다른 계열) 조작점검 미통과 쌍",
+        "otherwise": "조작점검 통과 쌍의 오복원은 픽스처 탓으로 배제할 수 없다."
+      },
+      "caprice_defense": {
+        "admissible_only_if": "해당 축에서 probe_result=flip이 실제 관측된 경우",
+        "otherwise": "flip 미관측 축의 오복원은 변덕 탓으로 배제할 수 없다."
+      },
+      "label_defense": {
+        "admissible_only_if": "봉인 라벨 개봉 후 명시 번복 이벤트가 기록된 경우",
+        "hard_limit": "번복율이 label_reversal_void_threshold_percent를 초과하면 세션 VOID"
+      }
+    },
+    "sacrifice_axis_rule": {
+      "statement": "검증 세션은 프로브 2슬롯을 지불하므로 2개 축이 미시험으로 남는다. 어떤 축을 희생할지는 런타임/개발자 재량이 아니라 사전 고정이다.",
+      "selection_criterion": "mined prior가 가장 강한 축 2개 (채굴 최빈값 지지도 상위)",
+      "fixed_sacrificed_axes": [
+        "response_language",
+        "commit_style"
+      ],
+      "count": 2,
+      "consequence": "희생 축은 mined-prior 값을 '반증 대기 추측(n=0)'으로 방출하되 corroboration_grade는 '완전 미시험'으로 표기하며, 해당 축에 대한 결론은 본 사전등록의 판정 범위 밖이다."
+    },
+    "probe_selection_rule": {
+      "statement": "프로브 쌍은 이벤트 prefix의 순수 함수인 결정론적 규칙으로 선정한다. 선정에 사람 판단이나 난수가 개입하지 않으므로 사후 조작이 불가능하다.",
+      "rule": "슬롯 9 프로브 = 전반부(슬롯 1-8)에서 판별력이 인정된(pair-strike가 아닌) 최초 페어의 좌우 반전 미러. 슬롯 13 프로브 = 그 다음으로 판별력이 인정된 페어의 미러. 전반부 판별쌍이 2개 미만이면 부족분은 직전 판별쌍의 미러로 채운다.",
+      "fixed_slots": [
+        9,
+        13
+      ],
+      "properties": {
+        "mirrored": true,
+        "terminal": "프로브는 재추첨 불가 - pair-strike가 나와도 재추첨 캡을 소비하지 않는다.",
+        "inert_in_compile_fold": true,
+        "event_types": [
+          "probe_shown",
+          "probe_result"
+        ],
+        "result_domain": [
+          "flip",
+          "consistent"
+        ]
+      },
+      "profile_guard": "session_start.profile=product 스트림에 프로브 이벤트가 나타나면 판정 fold가 해당 스트림을 무효 처리한다."
+    },
+    "consequence_ladder": {
+      "denominator": "매핑된 축만 (교정 셀 제외, unmappable 제외)",
+      "rungs": [
+        {
+          "order": 1,
+          "condition": "오복원율 > 33%",
+          "verdict": "core_refutation",
+          "action": "긋기-only 접근 반증. 직접편집 전환으로 피벗한다."
+        },
+        {
+          "order": 2,
+          "condition": "오복원 >= 정복원 (동률 포함)",
+          "verdict": "core_refutation",
+          "action": "fold가 refutation_condition_met을 기계 방출하고, 인간의 refutation_acknowledged 이벤트로만 확정된다."
+        },
+        {
+          "order": 3,
+          "condition": "10% <= 오복원율 <= 33%",
+          "verdict": "demotion",
+          "action": "strike-only에서 strike+confirmation으로 강등. 축별 복원안 원탭 확인 채널 추가 결정을 기록한다."
+        },
+        {
+          "order": 4,
+          "condition": "오복원율 < 10%",
+          "verdict": "survival",
+          "action": "strike-only 존속. 단 생존은 승인이 아니라 '아직 반증 안 됨'이며, 미시험/무차별 생존 축은 4막 재심 큐로 넘긴다."
+        }
+      ],
+      "evaluation_order": "위에서 아래로 최초 일치하는 단만 적용한다."
+    },
+    "refutation_condition": {
+      "preconditions": [
+        "catalog_version v1 동결 상태",
+        "VOID 아닌 유효 검증 세션 누적 >= validation_session_count_n_val",
+        "판별시험-통과 인스턴스 누적(전체 합산) >= cumulative_discriminative_instance_floor"
+      ],
+      "trigger": "오복원 >= 정복원",
+      "machine_event": "refutation_condition_met",
+      "human_gate": "refutation_acknowledged",
+      "single_session_judgment": "금지 - 단일 세션으로는 어떤 판정도 성립하지 않는다.",
+      "floor_shortfall": "누적 인스턴스 하한 미달 시 3세션째로 연장 후 종료."
+    },
+    "catalog_revision_policy": {
+      "max_revisions": 1,
+      "path": "v1 -> v2",
+      "crosswalk_required": true,
+      "counter_carryover": "누적 카운터는 crosswalk로 승계한다 - 리셋 금지.",
+      "consumed_event": "catalog_revision_consumed",
+      "after_consumption": "v2에서 동일 기준이 재충족되면 추가 개정 없이 확정 반증."
+    },
+    "scoring_spec": {
+      "categories": [
+        "정복원",
+        "오복원",
+        "미판별",
+        "unmappable",
+        "교정"
+      ],
+      "accuracy_denominator": "매핑된 축만",
+      "coverage_metric": "매핑축 / 8 (정확도와 별개 지표로 보고)",
+      "correction_cell": "수기값 != 판별시험 생존값인 충돌 축. core 반증 지표 분모에서 제외하고 별도 리포트 - 제품의 교정 기능이 자기반증 지표의 벌점이 되는 자기모순을 차단한다.",
+      "out_of_catalog": "채점 제외하되 JSONL 반증 로그로 원문째 수집."
+    },
+    "deadline": {
+      "prereg_sealed_by": "2026-08-28T00:00:00Z",
+      "constraint": "본 문서는 검증 세션 1 개시 이전에 봉인되어야 한다.",
+      "session_1_not_before": "2026-08-28T00:00:00Z",
+      "session_2_not_before": "세션 1 종료 + 48시간",
+      "judgment_deadline": "2026-10-27T00:00:00Z",
+      "on_deadline_miss": "봉인일로부터 60일 내에 유효 검증 세션을 확보하지 못하면(번복율 초과 또는 축 하한 미달로 session_voided 반복 포함) 판정 불성립으로 종료하고, 그 사실 자체를 결과로 보고한다."
+    },
+    "limitations": [
+      "S_scn=1이므로 시나리오 일반화 주장은 불가하며 결과는 단일 시나리오 내부 타당도에 한정된다.",
+      "N_val=2(연장 시 3)는 통계적 검정력이 아니라 사례 기반 반증 시도다 - 효과크기/신뢰구간을 산출하지 않는다.",
+      "채점자가 저자 본인이므로 라벨 봉인/개봉 프로토콜로 완화할 뿐 독립성을 완전히 확보하지 못한다.",
+      "8축 x 3값 카탈로그는 채굴 산물이라 out-of-catalog 문장은 구조적으로 채점 불가하며 별도 JSONL로만 수집된다.",
+      "기억 효과 대응(재무작위화 / 48시간 간격 / 경로 다변화)은 완화 조치이지 제거가 아니다.",
+      "교정 셀 분모 제외는 자기모순 차단 조치이며, 그만큼 core 지표의 커버리지는 좁아진다.",
+      "mined prior 2축을 희생하므로 해당 축에 대한 결론은 본 사전등록에서 산출되지 않는다.",
+      "MVP는 global 스코프 한정이며 per-repo 2-tier 결과는 이 판정의 적용 범위가 아니다.",
+      "무차별 생존(pair-strike)은 corroboration이 아니므로 생존 축 수가 많다는 사실은 추측을 지지하지 않는다."
+    ],
+    "code_scan_guard": {
+      "statement": "아래 파라미터 키와 어휘는 코드/config에 존재해서는 안 된다. 판정 영향 수치는 오직 이 봉인 문서 안에만 있으며, 런타임은 이 값을 읽어 분기하지 않는다.",
+      "forbidden_parameter_lexemes": [
+        "cap",
+        "n_val",
+        "s_scn",
+        "floor",
+        "threshold",
+        "ladder",
+        "deadline",
+        "reversal",
+        "sacrifice",
+        "probe_slot",
+        "quorum",
+        "min_sessions",
+        "min_axes",
+        "min_instances",
+        "void_rate"
+      ],
+      "non_runtime_paths": [
+        "docs/",
+        "tests/",
+        "seed.yaml"
+      ]
+    }
+  }
+}

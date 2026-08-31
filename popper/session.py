@@ -68,8 +68,16 @@ REASON_PROBE_REDRAWN = "probe_redrawn"
 
 _COMPLETE = "complete"
 
-DEFAULT_PREREG_PATH: Path = (
+_SOURCE_PREREG_PATH = (
     Path(__file__).resolve().parent.parent / "docs" / "prereg" / "prereg_sealed.json"
+)
+_PACKAGED_PREREG_PATH = (
+    Path(__file__).resolve().parent / "_data" / "prereg" / "prereg_sealed.txt"
+)
+DEFAULT_PREREG_PATH: Path = (
+    _SOURCE_PREREG_PATH
+    if _SOURCE_PREREG_PATH.is_file()
+    else _PACKAGED_PREREG_PATH
 )
 
 # 아래 기본값의 출처는 봉인 사전등록 문서 docs/prereg/prereg_sealed.json이다

@@ -167,6 +167,17 @@ def test_condition_met_on_tie_between_mis_and_correct() -> None:
     assert state.condition_met
 
 
+def test_missing_restoration_evidence_does_not_form_a_zero_zero_tie() -> None:
+    state = fold_judgment(
+        [
+            seal(),
+            validated(3, 0, 0, event_id="val-1"),
+            validated(3, 0, 0, event_id="val-2"),
+        ]
+    )
+    assert not state.condition_met
+
+
 def test_confirmation_requires_human_acknowledged() -> None:
     events = refuting_stream()
     state = fold_judgment(events)
@@ -289,6 +300,19 @@ def test_void_session_instances_count_for_neither_side() -> None:
     only_void = fold_judgment([seal(), voided(6, 1, 5, event_id="void-a")])
     assert only_void.discriminative_instances == 0
     assert not only_void.condition_met
+
+
+def test_non_validation_profiles_do_not_count_as_validation_evidence() -> None:
+    product = validated(N_INSTANCES, 0, 0, event_id="product")
+    product.payload["profile"] = "product"
+    recheck = validated(N_INSTANCES, 0, 0, event_id="recheck")
+    recheck.payload["profile"] = "recheck"
+
+    state = fold_judgment([seal(), product, recheck])
+
+    assert state.valid_sessions == 0
+    assert state.discriminative_instances == 0
+    assert len(state.rejected) == 2
 
 
 # --- 저장 금지와 replay 결정성 ----------------------------------------------

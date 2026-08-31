@@ -180,6 +180,7 @@ def fold_judgment(events: Iterable[StrikeEvent | Event]) -> JudgmentState:
             basis is not None
             and valid_sessions >= basis.required_valid_sessions
             and instances >= basis.required_discriminative_instances
+            and correct + mis > 0
             and mis >= correct
         )
 
@@ -213,6 +214,13 @@ def fold_judgment(events: Iterable[StrikeEvent | Event]) -> JudgmentState:
         if etype is EventType.SESSION_VALIDATED:
             if basis is None:
                 reject(event, "봉인 이전의 검증 세션 - 증거 불산입")
+                continue
+            declared_profile = payload.get("profile")
+            if (
+                isinstance(declared_profile, str)
+                and declared_profile != "validation"
+            ):
+                reject(event, "검증 프로파일 밖 세션 - 증거 불산입")
                 continue
             valid_sessions += 1
             instances += _evidence_int(payload, DISCRIMINATIVE_INSTANCES_KEY)

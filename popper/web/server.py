@@ -1,12 +1,16 @@
-"""AC8 - 표준 라이브러리만 쓰는 로컬 단일 페이지 서버.
+"""표준 라이브러리만 쓰는 로컬 단일 페이지 서버.
 
-경로는 셋뿐이다.
+경로는 넷뿐이다.
 
   GET  /        완성된 단일 페이지. 첫 응답에 이미 첫 페어가 박혀 있다.
   GET  /state   현재 페어 + 가설 카운터 + 컴파일된 룰 JSON.
   POST /strike  긋기 한 건을 받고 갱신된 같은 JSON을 되돌려준다.
+  POST /undo    마지막 긋기를 undo_tombstone 명시 채널로 무른다(AC3).
 
-승인/확정 경로는 존재하지 않는다. 서버가 받는 유일한 쓰기 동사는 긋기다.
+승인/확정 경로는 존재하지 않는다. 가설 공간을 움직이는 유일한 동사는 긋기이고,
+undo는 오긋기 복구의 명시 이벤트 채널이지 승인이 아니다. 슬롯 캡이 닫힌
+세션의 긋기는 409로 기각된다 - 자동 연장은 없다.
+
 루프백 주소에만 바인딩하며 외부로 나가는 요청은 한 건도 만들지 않는다.
 """
 
@@ -21,7 +25,12 @@ from typing import Any
 
 from popper.events import SchemaViolation
 from popper.web.page import render_page
-from popper.web.state import ColdOpenSession
+from popper.web.state import (
+    ColdOpenSession,
+    RecoveryUnavailable,
+    SessionComplete,
+    StalePresentation,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +40,7 @@ EPHEMERAL_PORT = 0
 PATH_INDEX = "/"
 PATH_STATE = "/state"
 PATH_STRIKE = "/strike"
+PATH_UNDO = "/undo"
 
 CONTENT_HTML = "text/html; charset=utf-8"
 CONTENT_JSON = "application/json; charset=utf-8"
@@ -40,7 +50,7 @@ MAX_BODY_BYTES = 4096
 
 
 class ColdOpenServer(ThreadingHTTPServer):
-    """콜드 오픈 세션 하나를 들고 있는 로컬 서버."""
+    """세션 하나를 들고 있는 로컬 서버."""
 
     daemon_threads = True
     allow_reuse_address = True
@@ -61,7 +71,7 @@ class ColdOpenServer(ThreadingHTTPServer):
 
 
 class ColdOpenHandler(BaseHTTPRequestHandler):
-    """긋기만 받는 요청 핸들러."""
+    """긋기와 무름만 받는 요청 핸들러."""
 
     server_version = "PopperColdOpen"
     protocol_version = "HTTP/1.1"
@@ -78,11 +88,17 @@ class ColdOpenHandler(BaseHTTPRequestHandler):
         self._send_json(HTTPStatus.NOT_FOUND, {"error": "unknown_path", "path": self.path})
 
     def do_POST(self) -> None:
-        if self.path != PATH_STRIKE:
-            self._send_json(
-                HTTPStatus.NOT_FOUND, {"error": "unknown_path", "path": self.path}
-            )
+        if self.path == PATH_STRIKE:
+            self._handle_strike()
             return
+        if self.path == PATH_UNDO:
+            self._handle_undo()
+            return
+        self._send_json(
+            HTTPStatus.NOT_FOUND, {"error": "unknown_path", "path": self.path}
+        )
+
+    def _handle_strike(self) -> None:
         try:
             payload = self._read_json()
         except ValueError as e:
@@ -93,12 +109,44 @@ class ColdOpenHandler(BaseHTTPRequestHandler):
             return
 
         target = payload.get("target")
+        pair_id = payload.get("pair_id")
+        slot = payload.get("slot")
         try:
-            snapshot = self._session().strike(str(target))
+            snapshot = self._session().strike(
+                str(target),
+                expected_pair_id=str(pair_id) if pair_id is not None else None,
+                expected_slot=slot if isinstance(slot, int) else None,
+            )
         except SchemaViolation as e:
             logger.warning("긋기 대상이 스키마를 위반했다: %r", target, exc_info=True)
             self._send_json(
                 HTTPStatus.BAD_REQUEST, {"error": "unknown_target", "detail": str(e)}
+            )
+            return
+        except StalePresentation as e:
+            self._send_json(
+                HTTPStatus.CONFLICT,
+                {"error": "stale_presentation", "detail": str(e)},
+            )
+            return
+        except SessionComplete as e:
+            self._send_json(
+                HTTPStatus.CONFLICT, {"error": "session_complete", "detail": str(e)}
+            )
+            return
+        self._send_json(HTTPStatus.OK, snapshot.to_dict())
+
+    def _handle_undo(self) -> None:
+        try:
+            snapshot = self._session().undo()
+        except RecoveryUnavailable as e:
+            self._send_json(
+                HTTPStatus.CONFLICT, {"error": "nothing_to_undo", "detail": str(e)}
+            )
+            return
+        except SessionComplete as e:
+            self._send_json(
+                HTTPStatus.CONFLICT, {"error": "session_complete", "detail": str(e)}
             )
             return
         self._send_json(HTTPStatus.OK, snapshot.to_dict())
@@ -146,9 +194,14 @@ def build_server(
     host: str = HOST,
     port: int = EPHEMERAL_PORT,
     repo_root: Path | str | None = None,
+    **session_kwargs: Any,
 ) -> ColdOpenServer:
     """바인딩까지 끝난 서버를 돌려준다 - 세션이 없으면 여기서 콜드 오픈한다."""
-    active = session if session is not None else ColdOpenSession(repo_root=repo_root)
+    active = (
+        session
+        if session is not None
+        else ColdOpenSession(repo_root=repo_root, **session_kwargs)
+    )
     server = ColdOpenServer((host, port), ColdOpenHandler, active)
     logger.info("콜드 오픈 서버 대기: %s", server.url)
     return server
@@ -158,9 +211,13 @@ def serve(
     host: str = HOST,
     port: int = EPHEMERAL_PORT,
     repo_root: Path | str | None = None,
+    session: ColdOpenSession | None = None,
+    **session_kwargs: Any,
 ) -> None:
     """서버를 열고 인터럽트가 올 때까지 요청을 받는다."""
-    server = build_server(host=host, port=port, repo_root=repo_root)
+    server = build_server(
+        session=session, host=host, port=port, repo_root=repo_root, **session_kwargs
+    )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

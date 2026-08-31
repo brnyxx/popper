@@ -141,6 +141,30 @@ def test_third_identical_strike_reactivates_the_refutation() -> None:
     assert state.pending_revive == ()
 
 
+def test_explicit_tombstone_uses_the_same_recovery_dialect() -> None:
+    first = left_strike(V1, "frag-1")
+    tombstone = Event(
+        type=EventType.UNDO_TOMBSTONE,
+        session_id=SID,
+        payload={"strike_event_id": first.event_id},
+    )
+
+    undone = fold_recovery([session_start(SID, "main"), first, tombstone])
+    assert undone.warranted_refutations == ()
+    assert undone.axis_states[AXIS].refutation_count == 0
+
+    redone = fold_recovery(
+        [
+            session_start(SID, "main"),
+            first,
+            tombstone,
+            left_strike(V1, "frag-1"),
+        ]
+    )
+    assert len(redone.warranted_refutations) == 1
+    assert redone.pending_revive == ()
+
+
 def test_different_fragment_is_not_an_undo() -> None:
     events = [session_start(SID, "main"), left_strike(V1, "frag-1"), left_strike(V1, "frag-9")]
     state = fold_recovery(events)

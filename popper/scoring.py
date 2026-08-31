@@ -50,6 +50,29 @@ LABEL_RECORD = "label"
 OUT_OF_CATALOG_RECORD = "out_of_catalog_refutation"
 HASH_PREFIX = "sha256:"
 
+_SOURCE_GROUND_TRUTH_PATH = (
+    Path(__file__).resolve().parent.parent / "ground_truth" / "ground_truth.jsonl"
+)
+_PACKAGED_GROUND_TRUTH_PATH = (
+    Path(__file__).resolve().parent / "_data" / "ground_truth" / "ground_truth.txt"
+)
+DEFAULT_GROUND_TRUTH_PATH = (
+    _SOURCE_GROUND_TRUTH_PATH
+    if _SOURCE_GROUND_TRUTH_PATH.is_file()
+    else _PACKAGED_GROUND_TRUTH_PATH
+)
+_SOURCE_GROUND_TRUTH_HASH_PATH = (
+    Path(__file__).resolve().parent.parent / "ground_truth" / "ground_truth.sha256"
+)
+_PACKAGED_GROUND_TRUTH_HASH_PATH = (
+    Path(__file__).resolve().parent / "_data" / "ground_truth" / "ground_truth.sha256"
+)
+DEFAULT_GROUND_TRUTH_HASH_PATH = (
+    _SOURCE_GROUND_TRUTH_HASH_PATH
+    if _SOURCE_GROUND_TRUTH_HASH_PATH.is_file()
+    else _PACKAGED_GROUND_TRUTH_HASH_PATH
+)
+
 # 봉인 프로토콜 4단계의 증빙 필드 - seal 레코드에 전부 실려 있어야 한다.
 SEAL_PROTOCOL_FIELDS = (
     "draft_model_family",       # 타 모델 계열 초안
