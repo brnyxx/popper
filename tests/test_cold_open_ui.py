@@ -74,6 +74,7 @@ ALLOWED_IMPORT_ROOTS = frozenset(
     {
         "__future__",
         "argparse",
+        "contextlib",
         "dataclasses",
         "functools",
         "hashlib",
@@ -404,7 +405,7 @@ class StrikeOnlyAffordanceTest(ServerCase):
             with self.subTest(target=pane.strike_target):
                 self.assertEqual(pane.attrs.get("type"), "button")
                 self.assertIsNone(pane.attrs.get("role"))
-                self.assertIsNone(pane.attrs.get("tabindex"))
+                self.assertEqual(pane.attrs.get("tabindex"), "0")
                 self.assertIn("-text", pane.attrs.get("aria-labelledby", ""))
 
     def test_server_accepts_no_verb_other_than_striking(self) -> None:

@@ -401,12 +401,12 @@
       <p class="hint" id="strike-hint">틀렸다고 보이는 쪽을 그어라. 그은 값은 가설 공간에서 곧바로 빠지고, 오른쪽 컴파일 페인의 룰이 그 자리에서 다시 쓰인다.</p>
 
       <div class="panes">
-        <button type="button" class="pane" data-strike-target="left"
+        <button type="button" class="pane" data-strike-target="left" tabindex="0"
                 aria-labelledby="left-label left-text" aria-describedby="strike-hint">
           <span class="pane-label" id="left-label">왼쪽 긋기</span>
           <span class="transcript" id="left-text">{{LEFT_TEXT}}</span>
         </button>
-        <button type="button" class="pane" data-strike-target="right"
+        <button type="button" class="pane" data-strike-target="right" tabindex="0"
                 aria-labelledby="right-label right-text" aria-describedby="strike-hint">
           <span class="pane-label" id="right-label">오른쪽 긋기</span>
           <span class="transcript" id="right-text">{{RIGHT_TEXT}}</span>

@@ -65,3 +65,10 @@ def test_public_distribution_has_license_and_automation() -> None:
     assert "Copyright (c) 2026 Brian Kim" in license_text
     assert (ROOT / ".github" / "workflows" / "ci.yml").is_file()
     assert (ROOT / ".github" / "workflows" / "release.yml").is_file()
+
+
+def test_skill_distinguishes_servers_from_sync_diagnostics() -> None:
+    skill = (ROOT / "skills" / "popper" / "SKILL.md").read_text(encoding="utf-8")
+    assert "| (없음) 또는 `open` | 백그라운드+URL |" in skill
+    assert "| `doctor` | 포그라운드 출력 |" in skill
+    assert "조회·진단 명령(`status`, `sessions`, `doctor`)" in skill
