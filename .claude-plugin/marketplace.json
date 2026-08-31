@@ -1,0 +1,17 @@
+{
+  "name": "popper-marketplace",
+  "owner": {
+    "name": "Brian Kim"
+  },
+  "metadata": {
+    "description": "Popper Claude Code plugin marketplace",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "popper",
+      "version": "1.0.0",
+      "source": "./"
+    }
+  ]
+}
