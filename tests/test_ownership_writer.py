@@ -197,16 +197,29 @@ def test_rollback_removes_owned_occurrence_and_preserves_later_duplicate(
     tmp_path: Path,
 ) -> None:
     writer = make_writer(tmp_path)
+    before = writer.claude_md_path.read_bytes()
     enabled = writer.ensure_import(grant(writer))
-    duplicate = (enabled.line + "\n").encode("utf-8")
+    newline = b"\r\n" if b"\r\n" in before else b"\n"
+    duplicate = enabled.line.encode("utf-8") + newline
     with writer.claude_md_path.open("ab") as stream:
         stream.write(duplicate)
 
     rollback = writer.remove_import()
     assert rollback.reason == IMPORT_REMOVED
-    assert (
-        writer.claude_md_path.read_bytes() == CLAUDE_MD_BODY.encode("utf-8") + duplicate
+    assert writer.claude_md_path.read_bytes() == before + duplicate
+
+
+def test_crlf_file_round_trips_without_line_ending_drift(tmp_path: Path) -> None:
+    writer = make_writer(tmp_path)
+    before = CLAUDE_MD_BODY.replace("\n", "\r\n").encode("utf-8")
+    writer.claude_md_path.write_bytes(before)
+
+    enabled = writer.ensure_import(grant(writer))
+    assert writer.claude_md_path.read_bytes() == (
+        before + enabled.line.encode("utf-8") + b"\r\n"
     )
+    assert writer.remove_import().reason == IMPORT_REMOVED
+    assert writer.claude_md_path.read_bytes() == before
 
 
 def test_rollback_fails_closed_when_prefix_ownership_has_drifted(

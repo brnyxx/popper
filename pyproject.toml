@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "popper"
-version = "1.2.0"
+version = "1.2.1"
 description = "Falsification-first preference convergence for Claude Code — zero runtime LLM or external-network calls"
 readme = "README.md"
 requires-python = ">=3.10"

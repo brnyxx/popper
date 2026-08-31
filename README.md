@@ -14,7 +14,7 @@
 
 Popper replaces setup interviews with one verb: **strike the wrong side**. It shows two concrete coding-agent behaviors, records what you reject, and compiles the surviving preferences into local Claude Code rules.
 
-**v1.2.0 · Python 3.10–3.14 · MIT · zero third-party Python runtime packages · zero runtime LLM/external-network calls**
+**v1.2.1 · Python 3.10–3.14 · MIT · zero third-party Python runtime packages · zero runtime LLM/external-network calls**
 
 <details>
 <summary><strong>Watch a real 15-strike session</strong> (1.6 MB GIF)</summary>
@@ -24,16 +24,16 @@ Popper replaces setup interviews with one verb: **strike the wrong side**. It sh
 
 ## Start here
 
-Download `popper-plugin-1.2.0.zip`, `SHA256SUMS`, and `verify_checksums.py` from the [v1.2.0 release](../../releases/tag/v1.2.0). Keep all three in one directory and verify before extraction.
+Download `popper-plugin-1.2.1.zip`, `SHA256SUMS`, and `verify_checksums.py` from the [v1.2.1 release](../../releases/tag/v1.2.1). Keep all three in one directory and verify before extraction.
 
 macOS or Linux:
 
 ```bash
 python3 verify_checksums.py SHA256SUMS \
-  --only popper-plugin-1.2.0.zip verify_checksums.py
-DEST="$HOME/.local/share/popper-plugin-1.2.0"
+  --only popper-plugin-1.2.1.zip verify_checksums.py
+DEST="$HOME/.local/share/popper-plugin-1.2.1"
 test ! -e "$DEST" || { echo "destination already exists: $DEST" >&2; exit 1; }
-python3 -m zipfile -e popper-plugin-1.2.0.zip "$DEST"
+python3 -m zipfile -e popper-plugin-1.2.1.zip "$DEST"
 claude plugin marketplace add "$DEST"
 claude plugin install popper@popper-marketplace
 ```
@@ -42,10 +42,10 @@ Windows PowerShell:
 
 ```powershell
 py -3 verify_checksums.py SHA256SUMS `
-  --only popper-plugin-1.2.0.zip verify_checksums.py
-$Dest = Join-Path $env:LOCALAPPDATA "Popper\plugin-1.2.0"
+  --only popper-plugin-1.2.1.zip verify_checksums.py
+$Dest = Join-Path $env:LOCALAPPDATA "Popper\plugin-1.2.1"
 if (Test-Path $Dest) { throw "destination already exists: $Dest" }
-py -3 -m zipfile -e popper-plugin-1.2.0.zip $Dest
+py -3 -m zipfile -e popper-plugin-1.2.1.zip $Dest
 claude plugin marketplace add $Dest
 claude plugin install popper@popper-marketplace
 ```
@@ -162,7 +162,7 @@ Release assets include a wheel, source archive, Claude plugin ZIP, standalone ve
 
 ```bash
 python3 verify_checksums.py SHA256SUMS \
-  --only popper-plugin-1.2.0.zip verify_checksums.py
+  --only popper-plugin-1.2.1.zip verify_checksums.py
 ```
 
 A release is published only after the Python matrix, Chromium/Firefox/WebKit completion-and-recovery E2E, clean Claude marketplace install, plugin lifecycle, package build, and manifest-version gates pass. GitHub Actions and release actions are pinned to reviewed commit SHAs; the Claude CLI used by CI is pinned to an exact version.
@@ -171,22 +171,22 @@ A release is published only after the Python matrix, Chromium/Firefox/WebKit com
 
 Popper never performs a background version check.
 
-### Move an existing v1.1.0 marketplace to v1.2.0
+### Move an existing v1.1.0 or v1.2.0 marketplace to v1.2.1
 
-The v1.1.0 instructions registered `~/.local/share/popper-1.1.0`. Re-register the marketplace so Claude does not keep reading that old source:
+The v1.1.0 instructions registered `~/.local/share/popper-1.1.0`; v1.2.0 used `~/.local/share/popper-plugin-1.2.0`. Re-register the marketplace so Claude does not keep reading either old source:
 
 ```bash
 python3 verify_checksums.py SHA256SUMS \
-  --only popper-plugin-1.2.0.zip verify_checksums.py
-DEST="$HOME/.local/share/popper-plugin-1.2.0"
+  --only popper-plugin-1.2.1.zip verify_checksums.py
+DEST="$HOME/.local/share/popper-plugin-1.2.1"
 test ! -e "$DEST" || { echo "destination already exists: $DEST" >&2; exit 1; }
-python3 -m zipfile -e popper-plugin-1.2.0.zip "$DEST"
+python3 -m zipfile -e popper-plugin-1.2.1.zip "$DEST"
 claude plugin marketplace remove popper-marketplace
 claude plugin marketplace add "$DEST"
 claude plugin update popper@popper-marketplace
 ```
 
-Restart Claude Code and run `/popper:popper doctor`. Only after it reports healthy may you remove `~/.local/share/popper-1.1.0`.
+Restart Claude Code and run `/popper:popper doctor`. Only after it reports healthy may you remove `~/.local/share/popper-1.1.0` or `~/.local/share/popper-plugin-1.2.0`.
 
 ### Later releases
 

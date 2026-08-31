@@ -41,7 +41,9 @@ def test_doctor_is_healthy_for_empty_writable_install(tmp_path: Path) -> None:
     }
 
 
-def test_doctor_reports_corrupt_event_stream_without_repairing_it(tmp_path: Path) -> None:
+def test_doctor_reports_corrupt_event_stream_without_repairing_it(
+    tmp_path: Path,
+) -> None:
     sessions = tmp_path / "sessions"
     sessions.mkdir()
     broken = sessions / "broken.jsonl"
@@ -77,6 +79,7 @@ def test_activation_truth_distinguishes_inactive_active_and_drift(
     claude = home / ".claude"
     claude.mkdir(parents=True)
     monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     base = tmp_path / "data"
     base.mkdir()
     (base / "POPPER.md").write_text("# rules\n", encoding="utf-8")
@@ -97,7 +100,10 @@ def test_activation_truth_distinguishes_inactive_active_and_drift(
 def test_all_export_formats_are_deterministic_and_explicit(tmp_path: Path) -> None:
     store = _land(tmp_path / "data")
     events = store.load_completed()
-    rendered = {format_name: render_export(events, format_name) for format_name in EXPORT_FORMATS}
+    rendered = {
+        format_name: render_export(events, format_name)
+        for format_name in EXPORT_FORMATS
+    }
 
     assert rendered["markdown"].startswith("# Popper Rules")
     assert rendered["agents"].startswith("# Agent Instructions")

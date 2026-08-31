@@ -13,6 +13,9 @@ PAPER = (247, 243, 234)
 INK = (23, 23, 23)
 CRIMSON = (217, 35, 50)
 MUTED = (110, 106, 99)
+SURFACE = (217, 212, 201)
+PALETTE = (PAPER, INK, CRIMSON, MUTED, SURFACE)
+COLOR_INDEX = {color: index for index, color in enumerate(PALETTE)}
 
 FONT = {
     "A": "01110 10001 10001 11111 10001 10001 10001",
@@ -73,8 +76,7 @@ def png_chunk(kind: bytes, data: bytes) -> bytes:
 
 def put(canvas: bytearray, x: int, y: int, color: tuple[int, int, int]) -> None:
     if 0 <= x < W and 0 <= y < H:
-        i = (y * W + x) * 3
-        canvas[i : i + 3] = bytes(color)
+        canvas[y * W + x] = COLOR_INDEX[color]
 
 
 def rect(
@@ -111,18 +113,32 @@ def text(
         cursor += 6 * scale + gap
 
 
+def deterministic_zlib_store(data: bytes) -> bytes:
+    """Emit a portable zlib stream using only uncompressed DEFLATE blocks."""
+    result = bytearray(b"\x78\x01")
+    position = 0
+    while position < len(data):
+        chunk = data[position : position + 65_535]
+        position += len(chunk)
+        result.append(1 if position == len(data) else 0)
+        result.extend(struct.pack("<HH", len(chunk), 0xFFFF ^ len(chunk)))
+        result.extend(chunk)
+    result.extend(struct.pack(">I", zlib.adler32(data) & 0xFFFFFFFF))
+    return bytes(result)
+
+
 def main() -> None:
     output = (
         Path(sys.argv[1])
         if len(sys.argv) > 1
         else Path(".github/assets/social-card.png")
     )
-    canvas = bytearray(bytes(PAPER) * (W * H))
+    canvas = bytearray([COLOR_INDEX[PAPER]]) * (W * H)
     # Logo-derived contrast pair and a single crimson falsification strike.
     rect(canvas, 64, 70, 190, 190, INK)
     rect(canvas, 72, 78, 174, 174, PAPER)
     rect(canvas, 286, 70, 190, 190, INK)
-    rect(canvas, 294, 78, 174, 174, (217, 212, 201))
+    rect(canvas, 294, 78, 174, 174, SURFACE)
     for i in range(0, 170, 4):
         rect(canvas, 72 + i, 78 + i, 15, 15, CRIMSON)
     # Nine-by-nine hypothesis field narrowing to one survivor.
@@ -144,13 +160,17 @@ def main() -> None:
     rect(canvas, 694, 176, 410, 6, CRIMSON)
     text(canvas, 690, 236, "NO QUESTIONS.", 5, INK)
     text(canvas, 690, 292, "STRIKE THE WRONG SIDE.", 3, INK)
-    raw = b"".join(
-        b"\x00" + bytes(canvas[y * W * 3 : (y + 1) * W * 3]) for y in range(H)
-    )
+    rows: list[bytes] = []
+    for y in range(H):
+        row = canvas[y * W : (y + 1) * W]
+        packed = bytes((row[x] << 4) | row[x + 1] for x in range(0, W, 2))
+        rows.append(b"\x00" + packed)
+    raw = b"".join(rows)
     payload = (
         b"\x89PNG\r\n\x1a\n"
-        + png_chunk(b"IHDR", struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0))
-        + png_chunk(b"IDAT", zlib.compress(raw, 9))
+        + png_chunk(b"IHDR", struct.pack(">IIBBBBB", W, H, 4, 3, 0, 0, 0))
+        + png_chunk(b"PLTE", b"".join(bytes(color) for color in PALETTE))
+        + png_chunk(b"IDAT", deterministic_zlib_store(raw))
         + png_chunk(b"IEND", b"")
     )
     output.parent.mkdir(parents=True, exist_ok=True)

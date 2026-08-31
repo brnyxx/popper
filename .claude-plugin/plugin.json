@@ -1,7 +1,7 @@
 {
   "name": "popper",
   "displayName": "Popper",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Strike the wrong agent behavior; Popper compiles surviving preferences into local Claude Code rules.",
   "author": {
     "name": "Brian Kim"

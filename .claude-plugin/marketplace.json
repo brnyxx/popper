@@ -5,12 +5,12 @@
   },
   "metadata": {
     "description": "Popper Claude Code plugin marketplace",
-    "version": "1.2.0"
+    "version": "1.2.1"
   },
   "plugins": [
     {
       "name": "popper",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "source": "./"
     }
   ]

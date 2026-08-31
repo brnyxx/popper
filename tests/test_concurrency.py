@@ -43,6 +43,17 @@ def _atomic_writer(path: str, barrier, finished) -> None:
     finished.set()
 
 
+def _read_after_transient_share_release(path: Path) -> bytes:
+    deadline = time.monotonic() + 5
+    while True:
+        try:
+            return path.read_bytes()
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.001)
+
+
 def _landing_worker(base: str, session_id: str, target: str, barrier) -> None:
     store = EventStore(base)
     session = ColdOpenSession(
@@ -74,13 +85,17 @@ def _spawn_context():
     return multiprocessing.get_context("spawn")
 
 
-def test_concurrent_append_to_one_session_never_loses_or_merges_lines(tmp_path: Path) -> None:
+def test_concurrent_append_to_one_session_never_loses_or_merges_lines(
+    tmp_path: Path,
+) -> None:
     context = _spawn_context()
     workers = 4
     count = 40
     barrier = context.Barrier(workers)
     processes = [
-        context.Process(target=_append_worker, args=(str(tmp_path), worker, count, barrier))
+        context.Process(
+            target=_append_worker, args=(str(tmp_path), worker, count, barrier)
+        )
         for worker in range(workers)
     ]
     for process in processes:
@@ -107,14 +122,18 @@ def test_atomic_replace_never_exposes_partial_content(tmp_path: Path) -> None:
     process.start()
     barrier.wait()
     observations = 0
+    deadline = time.monotonic() + 30
     while not finished.is_set() or process.is_alive():
-        assert target.read_bytes() in allowed
+        if not process.is_alive() and not finished.is_set():
+            break
+        assert time.monotonic() < deadline
+        assert _read_after_transient_share_release(target) in allowed
         observations += 1
         time.sleep(0.001)
     process.join(30)
     assert process.exitcode == 0
     assert observations > 0
-    assert target.read_bytes() in allowed
+    assert _read_after_transient_share_release(target) in allowed
     assert not tuple(tmp_path.glob(".*.tmp"))
 
 
@@ -147,10 +166,7 @@ def test_base_runtime_admission_precedes_session_creation(tmp_path: Path) -> Non
     process.start()
     assert ready.wait(10)
     try:
-        assert (
-            main(["open", "--base-dir", str(tmp_path), "--no-browser", "--new"])
-            == 1
-        )
+        assert main(["open", "--base-dir", str(tmp_path), "--no-browser", "--new"]) == 1
         assert EventStore(tmp_path).session_ids() == ()
     finally:
         release.set()

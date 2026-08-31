@@ -14,7 +14,7 @@
 
 Popper는 설정 인터뷰를 하나의 동사로 바꿉니다. **틀린 쪽을 긋기.** 두 가지 구체적인 코딩 에이전트 행동을 보여 주고, 사용자가 거부한 것을 기록하며, 살아남은 선호를 로컬 Claude Code 규칙으로 컴파일합니다.
 
-**v1.2.0 · Python 3.10–3.14 · MIT · 서드파티 Python 런타임 패키지 0개 · 런타임 LLM/외부 네트워크 호출 0회**
+**v1.2.1 · Python 3.10–3.14 · MIT · 서드파티 Python 런타임 패키지 0개 · 런타임 LLM/외부 네트워크 호출 0회**
 
 <details>
 <summary><strong>실제 15긋기 세션 보기</strong> (1.6 MB GIF)</summary>
@@ -24,16 +24,16 @@ Popper는 설정 인터뷰를 하나의 동사로 바꿉니다. **틀린 쪽을 
 
 ## 여기서 시작하세요
 
-[v1.2.0 릴리스](../../releases/tag/v1.2.0)에서 `popper-plugin-1.2.0.zip`, `SHA256SUMS`, `verify_checksums.py`를 같은 디렉터리에 받은 뒤 압축을 풀기 전에 검증합니다.
+[v1.2.1 릴리스](../../releases/tag/v1.2.1)에서 `popper-plugin-1.2.1.zip`, `SHA256SUMS`, `verify_checksums.py`를 같은 디렉터리에 받은 뒤 압축을 풀기 전에 검증합니다.
 
 macOS 또는 Linux:
 
 ```bash
 python3 verify_checksums.py SHA256SUMS \
-  --only popper-plugin-1.2.0.zip verify_checksums.py
-DEST="$HOME/.local/share/popper-plugin-1.2.0"
+  --only popper-plugin-1.2.1.zip verify_checksums.py
+DEST="$HOME/.local/share/popper-plugin-1.2.1"
 test ! -e "$DEST" || { echo "destination already exists: $DEST" >&2; exit 1; }
-python3 -m zipfile -e popper-plugin-1.2.0.zip "$DEST"
+python3 -m zipfile -e popper-plugin-1.2.1.zip "$DEST"
 claude plugin marketplace add "$DEST"
 claude plugin install popper@popper-marketplace
 ```
@@ -42,10 +42,10 @@ Windows PowerShell:
 
 ```powershell
 py -3 verify_checksums.py SHA256SUMS `
-  --only popper-plugin-1.2.0.zip verify_checksums.py
-$Dest = Join-Path $env:LOCALAPPDATA "Popper\plugin-1.2.0"
+  --only popper-plugin-1.2.1.zip verify_checksums.py
+$Dest = Join-Path $env:LOCALAPPDATA "Popper\plugin-1.2.1"
 if (Test-Path $Dest) { throw "destination already exists: $Dest" }
-py -3 -m zipfile -e popper-plugin-1.2.0.zip $Dest
+py -3 -m zipfile -e popper-plugin-1.2.1.zip $Dest
 claude plugin marketplace add $Dest
 claude plugin install popper@popper-marketplace
 ```
@@ -162,7 +162,7 @@ popper export --format json > popper-rules.json
 
 ```bash
 python3 verify_checksums.py SHA256SUMS \
-  --only popper-plugin-1.2.0.zip verify_checksums.py
+  --only popper-plugin-1.2.1.zip verify_checksums.py
 ```
 
 Python matrix, Chromium/Firefox/WebKit 완료·복구 E2E, 깨끗한 Claude marketplace 설치, plugin lifecycle, package build, manifest version gate가 모두 통과해야 릴리스가 게시됩니다. GitHub Actions와 release action은 검토한 commit SHA로 고정했고 CI의 Claude CLI도 정확한 버전으로 고정했습니다.
@@ -171,22 +171,22 @@ Python matrix, Chromium/Firefox/WebKit 완료·복구 E2E, 깨끗한 Claude mark
 
 Popper는 background version check를 하지 않습니다.
 
-### 기존 v1.1.0 marketplace를 v1.2.0으로 이동
+### 기존 v1.1.0 또는 v1.2.0 marketplace를 v1.2.1로 이동
 
-v1.1.0 문서는 `~/.local/share/popper-1.1.0`을 등록했습니다. Claude가 이전 source를 계속 읽지 않도록 marketplace를 다시 등록합니다.
+v1.1.0 문서는 `~/.local/share/popper-1.1.0`, v1.2.0은 `~/.local/share/popper-plugin-1.2.0`을 등록했습니다. Claude가 이전 source를 계속 읽지 않도록 marketplace를 다시 등록합니다.
 
 ```bash
 python3 verify_checksums.py SHA256SUMS \
-  --only popper-plugin-1.2.0.zip verify_checksums.py
-DEST="$HOME/.local/share/popper-plugin-1.2.0"
+  --only popper-plugin-1.2.1.zip verify_checksums.py
+DEST="$HOME/.local/share/popper-plugin-1.2.1"
 test ! -e "$DEST" || { echo "destination already exists: $DEST" >&2; exit 1; }
-python3 -m zipfile -e popper-plugin-1.2.0.zip "$DEST"
+python3 -m zipfile -e popper-plugin-1.2.1.zip "$DEST"
 claude plugin marketplace remove popper-marketplace
 claude plugin marketplace add "$DEST"
 claude plugin update popper@popper-marketplace
 ```
 
-Claude Code를 다시 시작하고 `/popper:popper doctor`를 실행합니다. healthy 결과를 확인한 뒤에만 `~/.local/share/popper-1.1.0`을 제거합니다.
+Claude Code를 다시 시작하고 `/popper:popper doctor`를 실행합니다. healthy 결과를 확인한 뒤에만 `~/.local/share/popper-1.1.0` 또는 `~/.local/share/popper-plugin-1.2.0`을 제거합니다.
 
 ### 이후 릴리스
 

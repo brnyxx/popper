@@ -34,7 +34,7 @@ def atomic_write_bytes(target: Path | str, data: bytes) -> Path:
     temporary = Path(temporary_name)
     try:
         if previous_mode is not None:
-            os.fchmod(descriptor, previous_mode)
+            os.chmod(temporary, previous_mode)
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(data)
             stream.flush()

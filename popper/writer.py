@@ -346,7 +346,7 @@ class OwnedWriter:
 
         existed = target.exists()
         data = target.read_bytes() if existed else b""
-        if encoded in data.split(b"\n"):
+        if encoded in data.splitlines():
             return ImportOutcome(
                 path=target, line=line, changed=False, reason=IMPORT_ALREADY_PRESENT
             )
@@ -363,7 +363,8 @@ class OwnedWriter:
                 ),
             )
 
-        separator = b"" if (not data or data.endswith(b"\n")) else b"\n"
+        newline = b"\r\n" if b"\r\n" in data else b"\n"
+        separator = b"" if (not data or data.endswith((b"\n", b"\r"))) else newline
         receipt = {
             "artifact": "popper_activation_receipt",
             "schema_version": ACTIVATION_SCHEMA_VERSION,
@@ -373,7 +374,8 @@ class OwnedWriter:
             "created_file": not existed,
             "prefix_length": len(data),
             "prefix_sha256": self._prefix_hash(data),
-            "leading_newline": separator == b"\n",
+            "leading_newline": bool(separator),
+            "newline": "crlf" if newline == b"\r\n" else "lf",
         }
         self._write_activation_receipt_unlocked(receipt)
         if target.exists() != existed or (existed and target.read_bytes() != data):
@@ -384,7 +386,7 @@ class OwnedWriter:
                 changed=False,
                 reason=IMPORT_OWNERSHIP_DRIFT,
             )
-        atomic_write_bytes(target, data + separator + encoded + b"\n")
+        atomic_write_bytes(target, data + separator + encoded + newline)
         receipt["state"] = "added"
         self._write_activation_receipt_unlocked(receipt)
         logger.info("CLAUDE.md 소유 @import 추가: %s", target)
@@ -425,7 +427,7 @@ class OwnedWriter:
                 changed=False,
                 reason=(
                     IMPORT_NOT_OWNED
-                    if encoded in data.split(b"\n")
+                    if encoded in data.splitlines()
                     else IMPORT_NOT_PRESENT
                 ),
             )
@@ -433,6 +435,7 @@ class OwnedWriter:
         prefix_length = receipt.get("prefix_length")
         prefix_sha256 = receipt.get("prefix_sha256")
         leading_newline = receipt.get("leading_newline")
+        newline_name = receipt.get("newline", "lf")
         valid_receipt = (
             receipt.get("artifact") == "popper_activation_receipt"
             and receipt.get("schema_version") == ACTIVATION_SCHEMA_VERSION
@@ -447,6 +450,7 @@ class OwnedWriter:
             and len(prefix_sha256) == 64
             and all(character in "0123456789abcdef" for character in prefix_sha256)
             and isinstance(leading_newline, bool)
+            and newline_name in {"lf", "crlf"}
         )
         if not valid_receipt:
             return ImportOutcome(
@@ -455,7 +459,7 @@ class OwnedWriter:
                 changed=False,
                 reason=IMPORT_OWNERSHIP_DRIFT,
             )
-        if encoded not in data.split(b"\n"):
+        if encoded not in data.splitlines():
             self._clear_activation_receipt_unlocked()
             return ImportOutcome(
                 path=target,
@@ -471,7 +475,8 @@ class OwnedWriter:
                 reason=IMPORT_OWNERSHIP_DRIFT,
             )
 
-        insertion = (b"\n" if leading_newline else b"") + encoded + b"\n"
+        newline = b"\r\n" if newline_name == "crlf" else b"\n"
+        insertion = (newline if leading_newline else b"") + encoded + newline
         end = prefix_length + len(insertion)
         if (
             prefix_length > len(data)

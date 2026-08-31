@@ -449,9 +449,9 @@ def _write_tree(
     validate_tree(staging, repository_url, site_url)
     for path in sorted(staging.rglob("*"), reverse=True):
         os.chmod(path, 0o755 if path.is_dir() else 0o644)
-        os.utime(path, (FIXED_EPOCH, FIXED_EPOCH), follow_symlinks=False)
+        os.utime(path, (FIXED_EPOCH, FIXED_EPOCH))
     os.chmod(staging, 0o755)
-    os.utime(staging, (FIXED_EPOCH, FIXED_EPOCH), follow_symlinks=False)
+    os.utime(staging, (FIXED_EPOCH, FIXED_EPOCH))
 
 
 def _validate_paths(source: Path, destination: Path) -> None:
@@ -537,10 +537,13 @@ def tree_digest(root: Path) -> tuple[tuple[str, int, int, str], ...]:
     for path in sorted(root.rglob("*")):
         if path.is_file():
             stat = path.stat()
+            mode = stat.st_mode & 0o777
+            if os.name == "nt":
+                mode = 0o644 if os.access(path, os.W_OK) else 0o444
             records.append(
                 (
                     path.relative_to(root).as_posix(),
-                    stat.st_mode & 0o777,
+                    mode,
                     int(stat.st_mtime),
                     hashlib.sha256(path.read_bytes()).hexdigest(),
                 )
