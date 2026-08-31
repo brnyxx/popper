@@ -86,8 +86,20 @@ def summarize_session(events: Sequence[StrikeEvent | Event]) -> SessionSummary:
     if profile == PROFILE_RECHECK:
         slots_total = int(opening.payload.get("recheck_budget", 0))
     else:
-        spec = load_session_specs().get(profile)
-        slots_total = spec.total_slots if spec is not None else 0
+        raw_spec = opening.payload.get("session_spec")
+        if isinstance(raw_spec, dict):
+            discriminative = raw_spec.get("discriminative_slots")
+            probe_slots = raw_spec.get("probe_slots")
+            slots_total = (
+                discriminative + len(probe_slots)
+                if isinstance(discriminative, int)
+                and not isinstance(discriminative, bool)
+                and isinstance(probe_slots, list)
+                else 0
+            )
+        else:
+            spec = load_session_specs().get(profile)
+            slots_total = spec.total_slots if spec is not None else 0
     slots_used = sum(
         1
         for event in events

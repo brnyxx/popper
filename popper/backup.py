@@ -20,7 +20,7 @@ from popper.store import EventStore
 BACKUP_SCHEMA_VERSION = 1
 BACKUP_MANIFEST = "backup.json"
 MAX_BACKUP_FILES = 10_000
-MAX_UNCOMPRESSED_BYTES = 1_073_741_824
+MAX_UNCOMPRESSED_BYTES = 134_217_728
 
 
 def _sha256(data: bytes) -> str:
@@ -29,6 +29,15 @@ def _sha256(data: bytes) -> str:
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _limit_errors(member_count: int, uncompressed_bytes: int) -> tuple[str, ...]:
+    errors: list[str] = []
+    if member_count > MAX_BACKUP_FILES:
+        errors.append(f"too many archive members: {member_count}")
+    if uncompressed_bytes > MAX_UNCOMPRESSED_BYTES:
+        errors.append(f"archive expands beyond limit: {uncompressed_bytes}")
+    return tuple(errors)
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +88,7 @@ def create_backup(base_dir: Path | str, destination: Path | str) -> BackupResult
         store = EventStore(base)
         summaries = summarize_sessions(store.load_all())
         files: dict[str, bytes] = {}
+        total_bytes = 0
         if base.exists():
             for path in sorted(base.rglob("*")):
                 if not path.is_file() or path.is_symlink():
@@ -86,28 +96,42 @@ def create_backup(base_dir: Path | str, destination: Path | str) -> BackupResult
                 relative = path.relative_to(base).as_posix()
                 if path.name.endswith(".tmp"):
                     continue
-                files[relative] = path.read_bytes()
+                if len(files) + 2 > MAX_BACKUP_FILES:
+                    raise ValueError(
+                        f"백업 파일 수가 한도({MAX_BACKUP_FILES - 1})를 넘는다"
+                    )
+                size = path.stat().st_size
+                if total_bytes + size > MAX_UNCOMPRESSED_BYTES:
+                    raise ValueError(
+                        f"백업 원본 크기가 한도({MAX_UNCOMPRESSED_BYTES} bytes)를 넘는다"
+                    )
+                data = path.read_bytes()
+                files[relative] = data
+                total_bytes += len(data)
         manifest = {
             "artifact": "popper_backup",
             "schema_version": BACKUP_SCHEMA_VERSION,
             "created_at": _now(),
             "app_version": app_version(),
-            "source_base": str(base),
             "files": {
                 name: {"bytes": len(data), "sha256": _sha256(data)}
                 for name, data in files.items()
             },
             "sessions": [summary.to_dict() for summary in summaries],
         }
+        manifest_body = (
+            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+        ).encode("utf-8")
+        limit_errors = _limit_errors(
+            len(files) + 1, total_bytes + len(manifest_body)
+        )
+        if limit_errors:
+            raise ValueError("; ".join(limit_errors))
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             for name, data in files.items():
                 archive.writestr(name, data)
-            archive.writestr(
-                BACKUP_MANIFEST,
-                json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True)
-                + "\n",
-            )
+            archive.writestr(BACKUP_MANIFEST, manifest_body)
         payload = buffer.getvalue()
         atomic_write_bytes(target, payload)
         checksum = _sha256(payload)
@@ -133,29 +157,57 @@ def inspect_backup(path: Path | str) -> BackupInspection:
     try:
         with zipfile.ZipFile(source) as archive:
             names = archive.namelist()
-            if len(names) > MAX_BACKUP_FILES:
-                errors.append(f"too many archive members: {len(names)}")
             total_size = sum(info.file_size for info in archive.infolist())
-            if total_size > MAX_UNCOMPRESSED_BYTES:
-                errors.append(f"archive expands beyond limit: {total_size}")
+            errors.extend(_limit_errors(len(names), total_size))
             if errors:
-                raise zipfile.BadZipFile(errors[-1])
+                raise zipfile.BadZipFile("; ".join(errors))
             if len(names) != len(set(names)):
                 errors.append("duplicate archive member")
             if any(name.startswith("/") or ".." in Path(name).parts for name in names):
                 errors.append("unsafe archive path")
             try:
-                manifest = json.loads(archive.read(BACKUP_MANIFEST))
+                decoded = json.loads(archive.read(BACKUP_MANIFEST))
             except (KeyError, json.JSONDecodeError, UnicodeDecodeError) as exc:
                 errors.append(f"backup manifest unreadable: {exc}")
-                manifest = {}
-            schema_version = int(manifest.get("schema_version", 0) or 0)
-            created_at = str(manifest.get("created_at", ""))
-            archive_version = str(manifest.get("app_version", ""))
+                decoded = {}
+            if not isinstance(decoded, dict):
+                errors.append("backup manifest must be an object")
+                manifest: dict[str, Any] = {}
+            else:
+                manifest = decoded
+            raw_schema_version = manifest.get("schema_version")
+            if isinstance(raw_schema_version, int) and not isinstance(
+                raw_schema_version, bool
+            ):
+                schema_version = raw_schema_version
+            else:
+                errors.append("backup schema_version must be an integer")
+            raw_created_at = manifest.get("created_at")
+            created_at = raw_created_at if isinstance(raw_created_at, str) else ""
+            raw_app_version = manifest.get("app_version")
+            archive_version = (
+                raw_app_version if isinstance(raw_app_version, str) else ""
+            )
             raw_sessions = manifest.get("sessions", [])
-            sessions = raw_sessions if isinstance(raw_sessions, list) else []
+            if isinstance(raw_sessions, list):
+                sessions = [
+                    session for session in raw_sessions if isinstance(session, dict)
+                ]
+                if len(sessions) != len(raw_sessions):
+                    errors.append("invalid session record")
+            else:
+                errors.append("backup sessions must be an array")
             raw_files = manifest.get("files", {})
-            files = raw_files if isinstance(raw_files, dict) else {}
+            if isinstance(raw_files, dict):
+                files = {
+                    name: expected
+                    for name, expected in raw_files.items()
+                    if isinstance(name, str)
+                }
+                if len(files) != len(raw_files):
+                    errors.append("invalid file name record")
+            else:
+                errors.append("backup files must be an object")
             if schema_version != BACKUP_SCHEMA_VERSION:
                 errors.append(f"unsupported schema_version={schema_version}")
             for name, expected in files.items():
@@ -177,7 +229,7 @@ def inspect_backup(path: Path | str) -> BackupInspection:
             extras = set(names) - set(files) - {BACKUP_MANIFEST}
             if extras:
                 errors.append(f"unrecorded members: {','.join(sorted(extras))}")
-    except (OSError, zipfile.BadZipFile) as exc:
+    except (NotImplementedError, OSError, RuntimeError, zipfile.BadZipFile) as exc:
         errors.append(f"archive unreadable: {exc}")
 
     latest = max(

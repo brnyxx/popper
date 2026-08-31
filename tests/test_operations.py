@@ -6,6 +6,9 @@ import json
 import zipfile
 from pathlib import Path
 
+import pytest
+
+import popper.backup as backup_module
 from popper.backup import BACKUP_MANIFEST, create_backup, inspect_backup
 from popper.cli import _activation_state, main
 from popper.doctor import run_doctor
@@ -54,6 +57,19 @@ def test_doctor_reports_corrupt_event_stream_without_repairing_it(tmp_path: Path
     assert broken.read_text(encoding="utf-8") == body
 
 
+def test_doctor_rejects_partial_landing(tmp_path: Path) -> None:
+    base = tmp_path / "data"
+    _land(base)
+    (base / "manifest.json").unlink()
+
+    report = run_doctor(base)
+
+    assert not report.healthy
+    outputs = next(check for check in report.checks if check.name == "landed_outputs")
+    assert outputs.status == "error"
+    assert "partial landing" in outputs.evidence
+
+
 def test_activation_truth_distinguishes_inactive_active_and_drift(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -71,6 +87,9 @@ def test_activation_truth_distinguishes_inactive_active_and_drift(
     assert _activation_state(base)["status"] == "inactive"
     claude_md.write_text(f"# User\n{writer.import_line()}\n", encoding="utf-8")
     assert _activation_state(base)["status"] == "active"
+    (base / "POPPER.md").unlink()
+    assert _activation_state(base)["status"] == "import-drift"
+    (base / "POPPER.md").write_text("# rules\n", encoding="utf-8")
     claude_md.write_text("# User\n@/old/popper/POPPER.md\n", encoding="utf-8")
     assert _activation_state(base)["status"] == "import-drift"
 
@@ -129,3 +148,51 @@ def test_backup_manifest_is_not_listed_as_payload(tmp_path: Path) -> None:
     with zipfile.ZipFile(archive) as backup:
         manifest = json.loads(backup.read(BACKUP_MANIFEST))
     assert BACKUP_MANIFEST not in manifest["files"]
+
+
+def test_backup_inspection_rejects_malformed_manifest_shapes(tmp_path: Path) -> None:
+    for index, manifest in enumerate(([], {"schema_version": "one"})):
+        archive = tmp_path / f"malformed-{index}.zip"
+        with zipfile.ZipFile(archive, "w") as backup:
+            backup.writestr(BACKUP_MANIFEST, json.dumps(manifest))
+        report = inspect_backup(archive)
+        assert not report.healthy
+        assert report.errors
+
+
+def test_backup_inspection_reports_unsupported_compression(tmp_path: Path) -> None:
+    archive = tmp_path / "unsupported.zip"
+    with zipfile.ZipFile(archive, "w") as backup:
+        backup.writestr(BACKUP_MANIFEST, "{}")
+    body = bytearray(archive.read_bytes())
+    local = body.index(b"PK\x03\x04")
+    central = body.index(b"PK\x01\x02")
+    body[local + 8 : local + 10] = (99).to_bytes(2, "little")
+    body[central + 10 : central + 12] = (99).to_bytes(2, "little")
+    archive.write_bytes(body)
+
+    report = inspect_backup(archive)
+
+    assert not report.healthy
+    assert any("archive unreadable" in error for error in report.errors)
+
+
+def test_backup_producer_enforces_the_inspector_limits(
+    tmp_path: Path, monkeypatch
+) -> None:
+    base = tmp_path / "data"
+    base.mkdir()
+    (base / "one").write_text("1", encoding="utf-8")
+    (base / "two").write_text("2", encoding="utf-8")
+    target = tmp_path / "limited.zip"
+    monkeypatch.setattr(backup_module, "MAX_BACKUP_FILES", 2)
+
+    with pytest.raises(ValueError, match="파일 수"):
+        create_backup(base, target)
+    assert not target.exists()
+
+    monkeypatch.setattr(backup_module, "MAX_BACKUP_FILES", 10_000)
+    monkeypatch.setattr(backup_module, "MAX_UNCOMPRESSED_BYTES", 1)
+    with pytest.raises(ValueError, match="크기"):
+        create_backup(base, target)
+    assert not target.exists()

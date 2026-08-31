@@ -11,14 +11,15 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, Callable
 
-from popper.compiler import MANIFEST_JSON, verify_outputs
+from popper.compiler import MANIFEST_JSON, OUTPUT_FILES, verify_outputs
 from popper.fixtures import load_pack
 from popper.scoring import (
     DEFAULT_GROUND_TRUTH_HASH_PATH,
     DEFAULT_GROUND_TRUTH_PATH,
     load_ground_truth,
 )
-from popper.session import load_session_specs
+from popper.events import Event, EventType
+from popper.session import PROFILE_RECHECK, load_session_specs
 from popper.sessions import summarize_sessions
 from popper.store import EventStore
 
@@ -108,9 +109,14 @@ def _loopback_evidence() -> str:
 
 
 def _output_evidence(base_dir: Path) -> str:
-    manifest = base_dir / MANIFEST_JSON
-    if not manifest.exists():
-        return "no landed manifest"
+    existing = tuple(name for name in OUTPUT_FILES if (base_dir / name).is_file())
+    if not existing:
+        return "no landed outputs"
+    missing = tuple(name for name in OUTPUT_FILES if name not in existing)
+    if missing:
+        raise ValueError(
+            f"partial landing: present={','.join(existing)} missing={','.join(missing)}"
+        )
     mismatches = verify_outputs(base_dir)
     if mismatches:
         raise ValueError(json.dumps(mismatches, ensure_ascii=False))
@@ -165,6 +171,53 @@ def run_doctor(base_dir: Path | str) -> DoctorReport:
     try:
         replayed = store.load_all()
         summaries = summarize_sessions(replayed)
+        catalog_version = load_pack().catalog_version
+        specs = load_session_specs()
+        for summary in summaries:
+            if not summary.resumable:
+                continue
+            opening = next(
+                (
+                    event
+                    for event in replayed
+                    if event.session_id == summary.session_id
+                    and isinstance(event, Event)
+                    and event.type is EventType.SESSION_START
+                ),
+                None,
+            )
+            if opening is None:
+                raise ValueError(f"session_start 없음: {summary.session_id}")
+            if opening.payload.get("fixture_catalog_version") != catalog_version:
+                raise ValueError(
+                    f"fixture catalog 불일치: {summary.session_id}"
+                )
+            if summary.profile != PROFILE_RECHECK:
+                spec = specs.get(summary.profile)
+                expected_spec = (
+                    {
+                        "discriminative_slots": spec.discriminative_slots,
+                        "probe_slots": list(spec.probe_slots),
+                        "required_full_axes": spec.required_full_axes,
+                    }
+                    if spec is not None
+                    else None
+                )
+                if opening.payload.get("session_spec") != expected_spec:
+                    raise ValueError(f"session spec 불일치: {summary.session_id}")
+        stalled = [
+            summary.session_id
+            for summary in summaries
+            if summary.resumable
+            and summary.slots_total > 0
+            and summary.slots_used >= summary.slots_total
+        ]
+        if stalled:
+            raise ValueError(
+                "terminal event 없이 slot cap에 도달한 세션: "
+                + ",".join(stalled)
+                + " (popper resume으로 finalize 가능)"
+            )
         checks.append(
             DoctorCheck(
                 name="event_replay",

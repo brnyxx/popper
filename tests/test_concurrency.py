@@ -11,9 +11,10 @@ from pathlib import Path
 import pytest
 
 from popper.atomic import atomic_write_bytes
+from popper.cli import main
 from popper.compiler import MANIFEST_JSON, OUTPUT_FILES, write_outputs
 from popper.events import Event, EventType, StrikeTarget, strike
-from popper.locking import LockTimeout, ProcessFileLock
+from popper.locking import LockTimeout, ProcessFileLock, base_runtime_lock
 from popper.store import EventStore
 from popper.web.state import ColdOpenSession
 
@@ -59,6 +60,12 @@ def _landing_worker(base: str, session_id: str, target: str, barrier) -> None:
 
 def _hold_lock(path: str, ready, release) -> None:
     with ProcessFileLock(Path(path)):
+        ready.set()
+        release.wait(10)
+
+
+def _hold_base_runtime(base: str, ready, release) -> None:
+    with base_runtime_lock(base, timeout=5):
         ready.set()
         release.wait(10)
 
@@ -123,6 +130,28 @@ def test_lock_timeout_is_explicit_instead_of_hanging(tmp_path: Path) -> None:
         with pytest.raises(LockTimeout):
             with ProcessFileLock(path, timeout=0.1):
                 pass
+    finally:
+        release.set()
+        process.join(30)
+    assert process.exitcode == 0
+
+
+def test_base_runtime_admission_precedes_session_creation(tmp_path: Path) -> None:
+    context = _spawn_context()
+    ready = context.Event()
+    release = context.Event()
+    process = context.Process(
+        target=_hold_base_runtime,
+        args=(str(tmp_path), ready, release),
+    )
+    process.start()
+    assert ready.wait(10)
+    try:
+        assert (
+            main(["open", "--base-dir", str(tmp_path), "--no-browser", "--new"])
+            == 1
+        )
+        assert EventStore(tmp_path).session_ids() == ()
     finally:
         release.set()
         process.join(30)

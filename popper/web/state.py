@@ -34,8 +34,10 @@ from __future__ import annotations
 
 import logging
 import hashlib
+import json
 import uuid
-from dataclasses import dataclass, replace
+from contextlib import nullcontext
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from threading import RLock
 from typing import Any, Callable, Mapping, Sequence
@@ -298,6 +300,48 @@ def _mirrored_view(pair: RenderedPair) -> RenderedPair:
     )
 
 
+def _repo_skin_payload(skin: RepoSkin) -> dict[str, Any]:
+    return {
+        "file": skin.file,
+        "lang": skin.lang,
+        "framework": skin.framework,
+        "generic": skin.generic,
+    }
+
+
+def _rendered_pairs_digest(pairs: Sequence[RenderedPair]) -> str:
+    payload = json.dumps(
+        [asdict(pair) for pair in pairs],
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def _sealed_repo_skin(payload: Mapping[str, Any]) -> RepoSkin:
+    raw = payload.get("repo_skin")
+    if not isinstance(raw, Mapping):
+        raise SchemaViolation("재개 이벤트에 봉인된 repo_skin이 없다")
+    file = raw.get("file")
+    lang = raw.get("lang")
+    framework = raw.get("framework")
+    generic = raw.get("generic")
+    if not all(isinstance(value, str) and value for value in (file, lang, framework)):
+        raise SchemaViolation("봉인된 repo_skin 문자열이 유효하지 않다")
+    if not isinstance(generic, bool):
+        raise SchemaViolation("봉인된 repo_skin.generic이 bool이 아니다")
+    file_path = Path(file)
+    if file_path.is_absolute() or ".." in file_path.parts:
+        raise SchemaViolation("봉인된 repo_skin.file은 안전한 상대 경로여야 한다")
+    return RepoSkin(
+        file=file,
+        lang=lang,
+        framework=framework,
+        generic=generic,
+    )
+
+
 def undone_strike_ids(events: Sequence[StrikeEvent | Event]) -> frozenset[str]:
     """undo_tombstone이 무른 strike 이벤트 id 집합 - 스트림의 순수 함수."""
     undone: set[str] = set()
@@ -416,6 +460,17 @@ class ColdOpenSession:
             resumed_ids = {event.session_id for event in resumed}
             if len(resumed_ids) != 1:
                 raise SchemaViolation("재개 이벤트는 한 세션에만 속해야 한다")
+            event_ids: set[str] = set()
+            for expected_seq, event in enumerate(resumed):
+                if event.seq != expected_seq:
+                    raise SchemaViolation(
+                        f"재개 이벤트 seq 불연속: {event.seq!r} != {expected_seq}"
+                    )
+                if event.event_id in event_ids:
+                    raise SchemaViolation(
+                        f"재개 이벤트 ID 중복: {event.event_id}"
+                    )
+                event_ids.add(event.event_id)
             resumed_id = next(iter(resumed_ids))
             if session_id is not None and session_id != resumed_id:
                 raise SchemaViolation("재개 session_id와 이벤트 session_id가 다르다")
@@ -440,6 +495,20 @@ class ColdOpenSession:
                 raise SchemaViolation(
                     f"재개 프로파일 불일치: {resumed_profile!r} != {profile!r}"
                 )
+            if opening_event.payload.get("fixture_catalog_version") != (
+                pack.catalog_version
+            ):
+                raise SchemaViolation("재개 fixture catalog 버전이 현재 배포물과 다르다")
+            skin = _sealed_repo_skin(opening_event.payload)
+            pairs = ordered_pairs(render_all_pairs(pack, skin))
+            if not pairs or pairs[0].axis != COLD_OPEN_AXIS:
+                raise SchemaViolation(
+                    "봉인된 repo_skin으로 콜드 오픈 페어를 복원하지 못했다"
+                )
+            if opening_event.payload.get(
+                "rendered_pairs_sha256"
+            ) != _rendered_pairs_digest(pairs):
+                raise SchemaViolation("재개 rendered pair digest가 현재 fixture와 다르다")
             if any(
                 isinstance(event, Event)
                 and event.type
@@ -526,22 +595,47 @@ class ColdOpenSession:
                 )
                 if not plan.targets:
                     raise SchemaViolation("재심 대기 대상이 없다")
-                opening = plan.opening
+                opening = replace(
+                    plan.opening,
+                    payload={
+                        **plan.opening.payload,
+                        "fixture_catalog_version": pack.catalog_version,
+                        "rendered_pairs_sha256": _rendered_pairs_digest(pairs),
+                        "repo_skin": _repo_skin_payload(skin),
+                    },
+                )
         else:
             specs = load_session_specs()
             spec = specs.get(profile)
             if spec is None:
                 raise SchemaViolation(f"봉인 문서에 없는 세션 프로파일: {profile!r}")
             self._spec = spec
+            sealed_spec = {
+                "discriminative_slots": spec.discriminative_slots,
+                "probe_slots": list(spec.probe_slots),
+                "required_full_axes": spec.required_full_axes,
+            }
+            if resumed and opening_event.payload.get("session_spec") != sealed_spec:
+                raise SchemaViolation("재개 session_spec이 현재 봉인 규격과 다르다")
             self._slots_total = spec.total_slots
             self._recheck_axes = None
             opening = Event(
                 type=EventType.SESSION_START,
                 session_id=self._session_id,
-                payload={"profile": profile},
+                payload={
+                    "profile": profile,
+                    "fixture_catalog_version": pack.catalog_version,
+                    "rendered_pairs_sha256": _rendered_pairs_digest(pairs),
+                    "repo_skin": _repo_skin_payload(skin),
+                    "session_spec": sealed_spec,
+                },
             )
         if not resumed:
             self._append(opening)
+        elif self._slots_used() > self._slots_total:
+            raise SchemaViolation("재개 이벤트가 봉인된 슬롯 cap을 초과했다")
+        elif self._slots_used() == self._slots_total:
+            self._finalize()
         logger.debug(
             "세션 준비 완료: session=%s profile=%s 슬롯 %d개 페어 %d개",
             self._session_id,
@@ -795,19 +889,32 @@ class ColdOpenSession:
 
     def _finalize(self) -> None:
         """마지막 슬롯이 닫힌 직후 한 번 - 판정 방출과 착지."""
+        lock = (
+            self._store.lock
+            if self._store is not None
+            else (
+                base_lock(self._land_dir)
+                if self._land_dir is not None
+                else nullcontext()
+            )
+        )
+        with lock:
+            self._finalize_locked()
+
+    def _finalize_locked(self) -> None:
+        """base 단위로 직렬화된 terminal+landing 전이를 수행한다."""
         voided_reason: str | None = None
+        terminal: Event
         if self._spec is not None:
             judgment = fold_session(self._log.events, {self._profile: self._spec})
             if judgment.voided is not None:
                 voided = judgment.voided.to_event()
-                self._append(
-                    Event(
-                        type=voided.type,
-                        session_id=voided.session_id,
-                        event_id=voided.event_id,
-                        at=voided.at,
-                        payload={**voided.payload, "profile": self._profile},
-                    )
+                terminal = Event(
+                    type=voided.type,
+                    session_id=voided.session_id,
+                    event_id=voided.event_id,
+                    at=voided.at,
+                    payload={**voided.payload, "profile": self._profile},
                 )
                 voided_reason = judgment.voided.reason
             elif judgment.complete and judgment.stream_valid:
@@ -831,39 +938,44 @@ class ColdOpenSession:
                     counts = report.cell_counts()
                     evidence[CORRECT_RESTORATIONS_KEY] = counts[CELL_RESTORED]
                     evidence[MIS_RESTORATIONS_KEY] = counts[CELL_MIS_RESTORED]
-                self._append(
-                    Event(
-                        type=EventType.SESSION_VALIDATED,
-                        session_id=self._session_id,
-                        payload=evidence,
-                    )
+                terminal = Event(
+                    type=EventType.SESSION_VALIDATED,
+                    session_id=self._session_id,
+                    payload=evidence,
                 )
             elif judgment.complete:
                 reason = judgment.reasons[0] if judgment.reasons else "stream_invalid"
-                self._append(
-                    Event(
-                        type=EventType.SESSION_VOIDED,
-                        session_id=self._session_id,
-                        payload={
-                            "reason": reason,
-                            "reasons": list(judgment.reasons),
-                            "profile": self._profile,
-                        },
-                    )
-                )
-                voided_reason = reason
-        else:
-            self._append(
-                Event(
-                    type=EventType.SESSION_VALIDATED,
+                terminal = Event(
+                    type=EventType.SESSION_VOIDED,
                     session_id=self._session_id,
                     payload={
-                        "profile": PROFILE_RECHECK,
-                        "session_kind": PROFILE_RECHECK,
+                        "reason": reason,
+                        "reasons": list(judgment.reasons),
+                        "profile": self._profile,
                     },
                 )
+                voided_reason = reason
+            else:
+                raise SchemaViolation("슬롯 cap 이전에는 세션을 finalize할 수 없다")
+        else:
+            terminal = Event(
+                type=EventType.SESSION_VALIDATED,
+                session_id=self._session_id,
+                payload={
+                    "profile": PROFILE_RECHECK,
+                    "session_kind": PROFILE_RECHECK,
+                },
             )
-        self._landing = self._land(voided_reason)
+        if (
+            voided_reason is None
+            and self._profile in (PROFILE_PRODUCT, PROFILE_RECHECK)
+        ):
+            landing = self._land(None)
+            self._append(terminal)
+            self._landing = landing
+        else:
+            self._append(terminal)
+            self._landing = self._land(voided_reason)
 
     @staticmethod
     def _check_presentation(
@@ -896,11 +1008,24 @@ class ColdOpenSession:
         try:
             lock = self._store.lock if self._store is not None else base_lock(self._land_dir)
             with lock:
-                events = (
-                    self._store.load_completed()
-                    if self._store is not None
-                    else self._all_events()
-                )
+                if self._store is not None:
+                    completed = self._store.load_completed()
+                    current_is_completed = any(
+                        event.session_id == self._session_id
+                        for event in completed
+                    )
+                    events = (
+                        completed
+                        if current_is_completed
+                        else tuple(
+                            sorted(
+                                completed + self._log.events,
+                                key=lambda event: event.at,
+                            )
+                        )
+                    )
+                else:
+                    events = self._all_events()
                 conflicts: Sequence[Mapping[str, Any]] = ()
                 if self._conflicts_for is not None:
                     conflicts = self._conflicts_for(compile_rules(events))

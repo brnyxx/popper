@@ -23,6 +23,7 @@ import logging
 import os
 import webbrowser
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
@@ -49,7 +50,7 @@ from popper.fixtures import load_pack
 from popper.doctor import app_version, run_doctor
 from popper.exporter import EXPORT_FORMATS, render_export, write_export
 from popper.judgment import acknowledge, emit_condition_met, fold_judgment
-from popper.locking import LockTimeout, base_lock, session_runtime_lock
+from popper.locking import LockTimeout, base_lock, base_runtime_lock
 from popper.recheck import (
     DEFAULT_BUDGET,
     MANUAL_COMMAND,
@@ -105,19 +106,17 @@ def _activation_state(base_dir: Path) -> dict[str, str | None]:
     writer = OwnedWriter(base_dir=base_dir)
     expected = writer.import_line()
     target = writer.claude_md_path
-    if not (base_dir / "POPPER.md").is_file():
-        return {
-            "status": "inactive",
-            "path": str(target),
-            "expected_import": expected,
-            "remediation": "popper open으로 세션을 먼저 완주해라",
-        }
+    output_exists = (base_dir / "POPPER.md").is_file()
     if not target.is_file():
         return {
             "status": "inactive",
             "path": str(target),
             "expected_import": expected,
-            "remediation": f"{target}를 만든 뒤 popper enable --grant를 실행해라",
+            "remediation": (
+                f"{target}를 만든 뒤 popper enable --grant를 실행해라"
+                if output_exists
+                else "popper open으로 세션을 먼저 완주해라"
+            ),
         }
     try:
         lines = target.read_text(encoding="utf-8").splitlines()
@@ -128,7 +127,7 @@ def _activation_state(base_dir: Path) -> dict[str, str | None]:
             "expected_import": expected,
             "remediation": f"CLAUDE.md를 읽지 못했다: {exc}",
         }
-    if expected in lines:
+    if expected in lines and output_exists:
         return {
             "status": "active",
             "path": str(target),
@@ -136,14 +135,24 @@ def _activation_state(base_dir: Path) -> dict[str, str | None]:
             "remediation": None,
         }
     stale = [line for line in lines if line.startswith("@") and "POPPER.md" in line]
+    if expected in lines:
+        stale.append(expected)
     return {
         "status": "import-drift" if stale else "inactive",
         "path": str(target),
         "expected_import": expected,
         "remediation": (
-            "popper rollback 후 popper enable --grant를 실행해라"
+            (
+                "popper rollback 후 popper enable --grant를 실행해라"
+                if output_exists
+                else "popper rollback 후 popper open을 실행해라"
+            )
             if stale
-            else "popper enable --grant를 실행해라"
+            else (
+                "popper enable --grant를 실행해라"
+                if output_exists
+                else "popper open으로 세션을 먼저 완주해라"
+            )
         ),
     }
 
@@ -357,26 +366,47 @@ def _latest_validation_end(
 # ---------------------------------------------------------------- 서브 명령
 
 
-def _serve(session: ColdOpenSession, args: argparse.Namespace) -> int:
-    try:
-        with session_runtime_lock(args.base_dir, session.session_id):
-            server = build_server(session=session, host=args.host, port=args.port)
-            logger.info("긋기 화면: %s", server.url)
-            logger.info(
-                "세션: %s (%s) - 중단은 Ctrl+C", session.session_id, session.profile
+def _runtime_exclusive(
+    command: Callable[[argparse.Namespace], int],
+) -> Callable[[argparse.Namespace], int]:
+    @wraps(command)
+    def wrapped(args: argparse.Namespace) -> int:
+        try:
+            with base_runtime_lock(args.base_dir):
+                return command(args)
+        except LockTimeout:
+            logger.error(
+                "다른 Popper 세션이 이 소유 디렉토리에서 실행 중이다: %s",
+                Path(args.base_dir).expanduser().resolve(),
             )
-            if not args.no_browser:
-                webbrowser.open(server.url)
-            try:
-                server.serve_forever()
-            except KeyboardInterrupt:
-                logger.info("서버를 닫는다")
-            finally:
-                server.shutdown()
-                server.server_close()
-    except LockTimeout:
-        logger.error("세션 %s은 이미 다른 Popper 프로세스에서 열려 있다", session.session_id)
-        return 1
+            return 1
+
+    return wrapped
+
+
+def _serve(session: ColdOpenSession, args: argparse.Namespace) -> int:
+    snapshot = session.snapshot()
+    if snapshot.session_complete:
+        logger.info(
+            "세션 복구 완료: %s (%s) - 서버를 열 필요가 없다",
+            session.session_id,
+            snapshot.landing.status if snapshot.landing is not None else "complete",
+        )
+        return 0
+    server = build_server(session=session, host=args.host, port=args.port)
+    logger.info("긋기 화면: %s", server.url)
+    logger.info(
+        "세션: %s (%s) - 중단은 Ctrl+C", session.session_id, session.profile
+    )
+    if not args.no_browser:
+        webbrowser.open(server.url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        logger.info("서버를 닫는다")
+    finally:
+        server.shutdown()
+        server.server_close()
     return 0
 
 
@@ -403,6 +433,7 @@ def _resumed_session(
     )
 
 
+@_runtime_exclusive
 def cmd_open(args: argparse.Namespace) -> int:
     base = Path(args.base_dir)
     manifest = _load_manifest(base)
@@ -449,6 +480,7 @@ def cmd_open(args: argparse.Namespace) -> int:
     return _serve(session, args)
 
 
+@_runtime_exclusive
 def cmd_resume(args: argparse.Namespace) -> int:
     base = Path(args.base_dir)
     store = EventStore(base)
@@ -484,6 +516,7 @@ def cmd_resume(args: argparse.Namespace) -> int:
     return _serve(session, args)
 
 
+@_runtime_exclusive
 def cmd_validate(args: argparse.Namespace) -> int:
     base = Path(args.base_dir)
     store = EventStore(base)
@@ -510,6 +543,7 @@ def cmd_validate(args: argparse.Namespace) -> int:
     return _serve(session, args)
 
 
+@_runtime_exclusive
 def cmd_recheck(args: argparse.Namespace) -> int:
     base = Path(args.base_dir)
     manifest = _load_manifest(base)
@@ -792,7 +826,11 @@ def cmd_export(args: argparse.Namespace) -> int:
 
 
 def cmd_data_backup(args: argparse.Namespace) -> int:
-    result = create_backup(args.base_dir, args.output)
+    try:
+        result = create_backup(args.base_dir, args.output)
+    except (OSError, ValueError) as exc:
+        logger.error("백업 생성 실패 - %s", exc)
+        return 1
     logger.info(
         "백업 완료: %s (파일 %d, 세션 %d)",
         result.path,

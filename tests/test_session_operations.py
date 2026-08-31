@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 import popper.cli
 from popper.cli import main
-from popper.events import Event, EventType, EventLog, StrikeEvent
+from popper.doctor import run_doctor
+from popper.events import Event, EventType, EventLog, SchemaViolation, StrikeEvent
 from popper.session import PROFILE_RECHECK
 from popper.sessions import (
     STATUS_IN_PROGRESS,
@@ -70,6 +72,76 @@ def test_product_session_resumes_at_exact_next_slot_and_lands(tmp_path: Path) ->
     assert sum(isinstance(event, StrikeEvent) for event in events) == 15
 
 
+def test_resume_uses_sealed_repo_skin_not_current_filesystem(tmp_path: Path) -> None:
+    repo_a = tmp_path / "repo-a"
+    repo_b = tmp_path / "repo-b"
+    repo_a.mkdir()
+    repo_b.mkdir()
+    (repo_a / "main.py").write_text("pass\n", encoding="utf-8")
+    (repo_b / "index.ts").write_text("export {};\n", encoding="utf-8")
+    store = EventStore(tmp_path / "data")
+    first = ColdOpenSession(
+        repo_root=repo_a,
+        session_id="sealed-skin",
+        store=store,
+        land_dir=tmp_path / "data",
+    )
+    first.strike("left")
+    events = store.load_session("sealed-skin")
+    opening = events[0]
+    assert isinstance(opening, Event)
+    assert opening.payload["repo_skin"]["lang"] == "Python"
+
+    resumed = ColdOpenSession(
+        repo_root=repo_b,
+        session_id="sealed-skin",
+        store=store,
+        land_dir=tmp_path / "data",
+        resume_events=events,
+    )
+    snapshot = resumed.snapshot()
+    assert "Python" in snapshot.pair.left_text
+    assert "TypeScript" not in snapshot.pair.left_text
+
+    broken_opening = replace(
+        opening,
+        payload={
+            key: value
+            for key, value in opening.payload.items()
+            if key != "repo_skin"
+        },
+    )
+    with pytest.raises(SchemaViolation, match="repo_skin"):
+        ColdOpenSession(
+            session_id="sealed-skin",
+            store=store,
+            land_dir=tmp_path / "data",
+            resume_events=(broken_opening, *events[1:]),
+        )
+    wrong_catalog = replace(
+        opening,
+        payload={**opening.payload, "fixture_catalog_version": "future"},
+    )
+    with pytest.raises(SchemaViolation, match="fixture catalog"):
+        ColdOpenSession(
+            session_id="sealed-skin",
+            store=store,
+            land_dir=tmp_path / "data",
+            resume_events=(wrong_catalog, *events[1:]),
+        )
+    wrong_pairs = replace(
+        opening,
+        payload={**opening.payload, "rendered_pairs_sha256": "sha256:tampered"},
+    )
+    with pytest.raises(SchemaViolation, match="rendered pair digest"):
+        ColdOpenSession(
+            session_id="sealed-skin",
+            store=store,
+            land_dir=tmp_path / "data",
+            resume_events=(wrong_pairs, *events[1:]),
+        )
+
+
 def test_recheck_resume_uses_persisted_budget_and_axes(tmp_path: Path) -> None:
     manifest = {
         "recheck_queue": [
@@ -117,6 +189,81 @@ def test_completed_session_cannot_be_resumed(tmp_path: Path) -> None:
             store=store,
             land_dir=tmp_path,
             resume_events=store.load_session("done"),
+        )
+
+
+def test_full_slot_crash_window_finalizes_idempotently_on_resume(
+    tmp_path: Path, monkeypatch
+) -> None:
+    store = EventStore(tmp_path)
+    session = ColdOpenSession(session_id="crash-window", store=store, land_dir=tmp_path)
+    for _ in range(14):
+        session.strike("left")
+    original_finalize = ColdOpenSession._finalize
+    monkeypatch.setattr(ColdOpenSession, "_finalize", lambda self: None)
+    session.strike("left")
+    assert summarize_session(store.load_session("crash-window")).resumable
+    assert not run_doctor(tmp_path).healthy
+    monkeypatch.setattr(ColdOpenSession, "_finalize", original_finalize)
+
+    resumed = ColdOpenSession(
+        session_id="crash-window",
+        store=store,
+        land_dir=tmp_path,
+        resume_events=store.load_session("crash-window"),
+    )
+    assert resumed.snapshot().session_complete
+    assert resumed.snapshot().landing.status == "landed"
+    events = store.load_session("crash-window")
+    assert sum(
+        isinstance(event, Event) and event.type is EventType.SESSION_VALIDATED
+        for event in events
+    ) == 1
+    assert run_doctor(tmp_path).healthy
+
+
+def test_cli_full_slot_recovery_does_not_leave_an_idle_server(
+    tmp_path: Path, monkeypatch
+) -> None:
+    store = EventStore(tmp_path)
+    session = ColdOpenSession(session_id="cli-crash", store=store, land_dir=tmp_path)
+    for _ in range(14):
+        session.strike("left")
+    original_finalize = ColdOpenSession._finalize
+    monkeypatch.setattr(ColdOpenSession, "_finalize", lambda self: None)
+    session.strike("left")
+    monkeypatch.setattr(ColdOpenSession, "_finalize", original_finalize)
+
+    def must_not_build_server(**kwargs):
+        raise AssertionError("recovered terminal session must not open a server")
+
+    monkeypatch.setattr(popper.cli, "build_server", must_not_build_server)
+    assert (
+        main(["resume", "cli-crash", "--base-dir", str(tmp_path), "--no-browser"])
+        == 0
+    )
+    assert not summarize_session(store.load_session("cli-crash")).resumable
+
+
+def test_resume_rejects_non_contiguous_or_duplicate_events(tmp_path: Path) -> None:
+    store = EventStore(tmp_path)
+    session = ColdOpenSession(session_id="corrupt", store=store, land_dir=tmp_path)
+    session.strike("left")
+    events = store.load_session("corrupt")
+
+    with pytest.raises(SchemaViolation, match="seq 불연속"):
+        ColdOpenSession(
+            session_id="corrupt",
+            store=store,
+            land_dir=tmp_path,
+            resume_events=(events[0], replace(events[1], seq=8)),
+        )
+    with pytest.raises(SchemaViolation, match="ID 중복"):
+        ColdOpenSession(
+            session_id="corrupt",
+            store=store,
+            land_dir=tmp_path,
+            resume_events=(events[0], replace(events[1], event_id=events[0].event_id)),
         )
 
 

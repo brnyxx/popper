@@ -81,14 +81,18 @@ claude --plugin-dir /path/to/popper
 ## 반복 사용과 복구
 
 - 각 선택은 즉시 세션 JSONL에 append되고 화면은 replay 결과만 보여 준다.
+- 시작 이벤트가 fixture catalog, 세션 규격, 파일 내용이 아닌 repo skin을 봉인해
+  다른 프로젝트나 변경된 배포물로 잘못 replay하지 않는다.
 - `popper open`은 미완료 일반 세션이 정확히 하나일 때 자동 재개한다.
 - 여러 미완료 세션은 임의 선택하지 않고 `popper resume <id>`를 요구한다.
-- 동일 세션을 두 프로세스가 동시에 열면 수명주기 잠금이 두 번째 서버를 거부한다.
+- 같은 소유 디렉토리에서 두 대화형 세션을 동시에 열면 base 수명주기 잠금이
+  두 번째 admission을 세션 생성 전에 거부한다.
 - 연결이 끊긴 웹 화면은 `popper resume`로 저장된 마지막 슬롯부터 이어진다고
   `role=alert`로 알린다.
 - `popper data backup /safe/path/popper.zip`은 잠금 안에서 원자 snapshot과
   SHA-256 sidecar를 만들며, `popper data inspect <zip> --json`은 추출 없이
-  경로·크기·checksum을 검증한다. 자동 restore나 silent repair는 없다.
+  경로·크기·checksum을 검증한다. producer와 inspector는 같은 9,999파일/
+  128 MiB payload 한도를 적용한다. 자동 restore나 silent repair는 없다.
 
 ## 산출물
 
